@@ -1,0 +1,107 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: patterned
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: patterned-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - patterned-owner-group-33c9d2
+      name: patterned-owner
+      policies:
+        - p, proj:patterned:patterned-owner, *, *, patterned/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - patterned-edit-group-36a6a0
+      name: patterned-edit
+      policies:
+        - p, proj:patterned:patterned-edit, *, *, patterned/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - patterned-view-group-816b39
+      name: patterned-view
+      policies:
+        - p, proj:patterned:patterned-view, *, get, patterned/*, allow
+  sourceRepos:
+    - https://github.com/acme/patterned-gitops
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: overridden
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: overridden-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overridden-owner-group-9e405f
+      name: overridden-owner
+      policies:
+        - p, proj:overridden:overridden-owner, *, *, overridden/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overridden-edit-group-b128d3
+      name: overridden-edit
+      policies:
+        - p, proj:overridden:overridden-edit, *, *, overridden/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overridden-view-group-c71f91
+      name: overridden-view
+      policies:
+        - p, proj:overridden:overridden-view, *, get, overridden/*, allow
+  sourceRepos:
+    - https://gitlab.example.com/team/apps.git
+    - https://github.com/acme/shared-lib
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: emptied
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: emptied-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - emptied-owner-group-7a333c
+      name: emptied-owner
+      policies:
+        - p, proj:emptied:emptied-owner, *, *, emptied/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - emptied-edit-group-af9458
+      name: emptied-edit
+      policies:
+        - p, proj:emptied:emptied-edit, *, *, emptied/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - emptied-view-group-4a40bd
+      name: emptied-view
+      policies:
+        - p, proj:emptied:emptied-view, *, get, emptied/*, allow

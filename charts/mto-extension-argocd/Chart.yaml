@@ -1,0 +1,25 @@
+apiVersion: v2
+name: mto-extension-argocd
+description: |
+  Per-tenant ArgoCD AppProjects for Multi Tenant Operator, rendered by
+  template-operator-v2 instead of a Go controller. Installs a parent Template
+  that ranges over Tenant CRs and emits one child TemplateInstance per tenant,
+  the child Template that renders that tenant's AppProject, and the RBAC
+  template-operator-v2 needs to manage AppProjects in the ArgoCD namespace.
+
+  Replaces ExtensionsArgoCDReconciler and the Extensions CRD in
+  multi-tenant-operator.
+
+  Requires: multi-tenant-operator (Tenant v1beta3 + IntegrationConfig v1beta1),
+  template-operator-v2 >= 0.0.5 (>= 0.0.6 for sync.mode=strict), and ArgoCD
+  (argoproj.io/v1alpha1 AppProject) installed.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - argocd
+  - multi-tenant-operator
+  - template-operator-v2
+home: https://github.com/stakater-ab/mto-extension-argocd
+sources:
+  - https://github.com/stakater-ab/mto-extension-argocd

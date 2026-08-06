@@ -1,0 +1,53 @@
+# OnAnnotation is the chart's DEFAULT mode, and until this fixture existed it
+# was the only mode with no render coverage -- the four other fixtures use
+# Always, and one uses OnLabel. A mutation test proved the gap was real:
+# replacing the OnAnnotation branch body with `$take = false`, or swapping
+# $annos for $labels, left the entire suite green.
+#
+# That matters more here than for any other mode. template-operator-v2 reaps
+# orphans, so a filter that silently stops matching does not merely fail to
+# create -- it DELETES every AppProject the chart manages.
+#
+# Only `opted-in` should appear in the golden:
+#   near-miss-True / near-miss-yes  the value must be exactly "true"
+#   labelled-only                   in OnAnnotation mode the LABEL is inert,
+#                                   which is what a swapped $annos/$labels
+#                                   would break
+values:
+  argocd:
+    namespace: openshift-gitops
+  scaffolding:
+    mode: OnAnnotation
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: opted-in
+        annotations:
+          argocd.tenantoperator.stakater.com/enabled: "true"
+      spec: {}
+    - metadata:
+        name: near-miss-True
+        annotations:
+          argocd.tenantoperator.stakater.com/enabled: "True"
+      spec: {}
+    - metadata:
+        name: near-miss-yes
+        annotations:
+          argocd.tenantoperator.stakater.com/enabled: "yes"
+      spec: {}
+    - metadata:
+        name: labelled-only
+        labels:
+          argocd.tenantoperator.stakater.com/enabled: "true"
+      spec: {}
+
+  namespaces:
+    - metadata: { name: opted-in-dev, labels: { stakater.com/tenant: opted-in } }
+    - metadata: { name: labelled-only-dev, labels: { stakater.com/tenant: labelled-only } }

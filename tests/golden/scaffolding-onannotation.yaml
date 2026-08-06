@@ -1,0 +1,34 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: opted-in
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: opted-in-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - opted-in-owner-group-d88662
+      name: opted-in-owner
+      policies:
+        - p, proj:opted-in:opted-in-owner, *, *, opted-in/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - opted-in-edit-group-b47aff
+      name: opted-in-edit
+      policies:
+        - p, proj:opted-in:opted-in-edit, *, *, opted-in/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - opted-in-view-group-42c5c0
+      name: opted-in-view
+      policies:
+        - p, proj:opted-in:opted-in-view, *, get, opted-in/*, allow

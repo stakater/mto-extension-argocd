@@ -1,0 +1,75 @@
+# Least-privilege split from PLAN §4.6, applied verbatim so the spike tests it.
+#
+#   cluster-wide : list + watch only        (discoverOwnedResources LISTs cluster-wide)
+#   namespaced   : every mutating verb      (AppProjects only ever live in the argo namespace)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spike-argocd-appproject-observe
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spike-argocd-appproject-observe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spike-argocd-appproject-observe
+subjects:
+  - kind: ServiceAccount
+    name: template-operator-v2
+    namespace: stakater-template-operator
+---
+# Mutating verbs, granted only inside the argo namespace via a RoleBinding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spike-argocd-appproject-write
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spike-argocd-appproject-write
+  namespace: stakater-tenant-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spike-argocd-appproject-write
+subjects:
+  - kind: ServiceAccount
+    name: template-operator-v2
+    namespace: stakater-template-operator
+---
+# IntegrationConfig is a namespaced singleton: namespace-scoped read only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spike-argocd-ic-read
+  namespace: stakater-tenant-operator
+rules:
+  - apiGroups: ["tenantoperator.stakater.com"]
+    resources: ["integrationconfigs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spike-argocd-ic-read
+  namespace: stakater-tenant-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spike-argocd-ic-read
+subjects:
+  - kind: ServiceAccount
+    name: template-operator-v2
+    namespace: stakater-template-operator

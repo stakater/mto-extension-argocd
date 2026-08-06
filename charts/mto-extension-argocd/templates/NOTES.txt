@@ -1,0 +1,54 @@
+mto-extension-argocd {{ .Chart.Version }} installed into {{ .Values.operatorNamespace }}.
+
+AppProjects are rendered into: {{ .Values.argocd.namespace }}
+Scaffolding mode:              {{ .Values.scaffolding.mode }}
+{{ if eq .Values.scaffolding.mode "OnAnnotation" -}}
+Opt a tenant in with:
+
+  kubectl annotate tenant <name> {{ .Values.scaffolding.annotations.enabled }}=true
+
+The value must be exactly "true".
+{{- else if eq .Values.scaffolding.mode "OnLabel" -}}
+Opt a tenant in with:
+
+  kubectl label tenant <name> {{ .Values.scaffolding.labels.enabled }}=true
+
+The value must be exactly "true".
+{{- else if eq .Values.scaffolding.mode "Always" -}}
+Every Tenant on this cluster now gets an AppProject.
+{{- else -}}
+scaffolding.mode is Never: no AppProjects will be rendered, and any that this
+release already owns have been reaped.
+{{- end }}
+
+READ BEFORE UNINSTALLING
+========================
+
+Do NOT run `helm uninstall` on its own. It deletes the RBAC and the
+TemplateInstances in one shot; the RBAC has no finalizers so it disappears
+immediately, while each TemplateInstance lingers on its own finalizer -- and
+that finalizer needs the RBAC that is already gone in order to delete the
+AppProjects it owns. Nothing completes, and you are left hand-clearing
+finalizers on every object.
+
+Uninstall in this order instead:
+
+  # 1. drop the parent; its children and their AppProjects drain while the
+  #    RBAC still exists
+  kubectl delete templateinstance.templates.v2.stakater.com \
+    mto-argocd-parent -n {{ .Values.operatorNamespace }}
+
+  # 2. wait until no children remain
+  kubectl get templateinstance.templates.v2.stakater.com \
+    -n {{ .Values.operatorNamespace }} | grep mto-argocd
+
+  # 3. now the release can go
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Note that step 1 DELETES every AppProject this release manages. Retain is not
+enforceable yet -- see docs/upstream-issues.md, TOV2-1.
+
+If you are reinstalling, wait for `Template/mto-argocd-parent` to disappear
+before doing so. `helm uninstall` returns before template-operator-v2 releases
+its finalizer, and an install in that window fails with an ownership-metadata
+error.

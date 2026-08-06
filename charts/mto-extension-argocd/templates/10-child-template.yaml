@@ -1,0 +1,56 @@
+{{- /*
+Renders one tenant's AppProject. The gotemplate is held in files/ rather than
+inline so that the render tests can extract and execute it against fixture
+parameters -- helm template alone only proves this Template CR is well-formed,
+not that the AppProject it produces is correct.
+*/ -}}
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: Template
+metadata:
+  name: {{ include "mto-extension-argocd.childTemplateName" . }}
+  namespace: {{ .Values.operatorNamespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+spec:
+  parameters:
+    - name: tenant
+      required: true
+      exposeInStatus: true
+    - name: argoNamespace
+      required: true
+      exposeInStatus: true
+    {{- /* Every list arrives JSON-encoded. A comma-joined empty list would be
+           "", which ResolveParameterValue treats as unset and rejects -- and a
+           tenant with zero namespaces is the case that hits it. */}}
+    - name: namespacesJson
+      value: "[]"
+      exposeInStatus: true
+    - name: whitelistJson
+      value: "[]"
+    - name: blacklistJson
+      value: "[]"
+    - name: sourceReposJson
+      value: "[]"
+    - name: privilegedGroupsJson
+      value: "[]"
+    - name: tenantGroupsJson
+      value: '{"owner":[],"edit":[],"view":[]}'
+    - name: tenantUsersJson
+      value: '{"owner":[],"edit":[],"view":[]}'
+    - name: onDeletePurge
+      value: {{ .Values.onDeletePurgeAppProject | toString | quote }}
+  {{- with include "mto-extension-argocd.sync" . }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  gotemplate: |
+    {{- .Files.Get "files/child-gotemplate.tpl" | nindent 4 }}
+  outputs:
+    - name: appproject
+      from:
+        apiVersion: argoproj.io/v1alpha1
+        kind: AppProject
+        name: "{.parameters.tenant}"
+        namespace: "{.parameters.argoNamespace}"
+      fields:
+        - name: destinations
+          jsonPath: "{.spec.destinations[*].namespace}"

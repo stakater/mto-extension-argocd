@@ -1,0 +1,97 @@
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: Template
+metadata:
+  name: {{ include "mto-extension-argocd.parentTemplateName" . }}
+  namespace: {{ .Values.operatorNamespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+spec:
+  parameters:
+    {{- /* Supplied by the parent TemplateInstance as objectFieldRefs. Declared
+           here without defaults so a missing one fails loudly. */}}
+    - name: tenants
+      required: true
+      exposeInStatus: false
+    - name: namespaces
+      required: true
+      exposeInStatus: false
+    - name: integrationConfig
+      required: true
+      exposeInStatus: false
+    {{- /* The rest are chart values, baked into the parent TemplateInstance. */}}
+    - name: operatorNamespace
+      value: {{ .Values.operatorNamespace | quote }}
+    - name: childTemplateName
+      value: {{ include "mto-extension-argocd.childTemplateName" . | quote }}
+    {{- /* values.schema.json enforces minLength 1 on argocd.namespace. A blank
+           value does not render zero children -- it renders one per tenant,
+           each emitting an AppProject with an empty namespace that the API
+           server rejects. Every tenant breaks at once. */}}
+    - name: argoNamespace
+      value: {{ .Values.argocd.namespace | quote }}
+      exposeInStatus: true
+    - name: tenantNamespaceLabel
+      value: {{ .Values.tenantNamespaceLabel | quote }}
+    {{- include "mto-extension-argocd.validateScaffoldingMode" . }}
+    - name: scaffoldingMode
+      value: {{ .Values.scaffolding.mode | quote }}
+    - name: scaffoldingAnnotationKey
+      value: {{ .Values.scaffolding.annotations.enabled | quote }}
+    - name: scaffoldingLabelKey
+      value: {{ .Values.scaffolding.labels.enabled | quote }}
+    - name: defaultWhitelistJson
+      value: {{ .Values.argocd.clusterResourceWhitelist | default list | toJson | quote }}
+    - name: defaultBlacklistJson
+      value: {{ .Values.argocd.namespaceResourceBlacklist | default list | toJson | quote }}
+    {{- include "mto-extension-argocd.validateSourceReposPattern" . }}
+    - name: sourceReposPattern
+      value: {{ .Values.argocd.sourceRepos.pattern | default "" | quote }}
+    - name: defaultOnDeletePurge
+      value: {{ .Values.onDeletePurgeAppProject | toString | quote }}
+    - name: annotationSourceRepos
+      value: {{ .Values.annotations.sourceRepos | quote }}
+    - name: annotationClusterResourceWhitelist
+      value: {{ .Values.annotations.clusterResourceWhitelist | quote }}
+    - name: annotationNamespaceResourceBlacklist
+      value: {{ .Values.annotations.namespaceResourceBlacklist | quote }}
+    - name: annotationOnDeletePurge
+      value: {{ .Values.annotations.onDeletePurge | quote }}
+  {{- with include "mto-extension-argocd.sync" . }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  gotemplate: |
+    {{- .Files.Get "files/parent-gotemplate.tpl" | nindent 4 }}
+  outputs:
+    {{- /* Per-tenant status is the child TemplateInstance; this aggregates them
+           so one object answers "is every tenant reconciled". */}}
+    - name: tenants
+      fromAll:
+        apiVersion: templates.v2.stakater.com/v2alpha1
+        kind: TemplateInstance
+        namespace: {{ .Values.operatorNamespace }}
+      keyTemplate: "{.metadata.name}"
+      fields:
+        # ready is what you alert on, reason is what you group by, errors is
+        # what you actually read.
+        #
+        # errors deliberately does NOT read the Ready condition's message. The
+        # Ready condition only ever summarises -- "Template rendering failed" --
+        # while the cause sits on whichever condition actually failed:
+        #
+        #   Rendered  TemplateExecutionFailed
+        #     failed to execute template: ... error calling mustFromJson:
+        #     invalid character 'b' looking for beginning of object key string
+        #   Ready     TemplateExecutionFailed
+        #     Template rendering failed
+        #
+        # Selecting every condition with status False gets the real message
+        # whichever stage broke -- parameter resolution, rendering, or apply --
+        # and yields nothing at all while the tenant is healthy. So this field
+        # costs almost no status size on a working fleet, and grows only around
+        # the tenants that need attention.
+        - name: ready
+          jsonPath: "{.status.conditions[?(@.type=='Ready')].status}"
+        - name: reason
+          jsonPath: "{.status.conditions[?(@.type=='Ready')].reason}"
+        - name: errors
+          jsonPath: "{.status.conditions[?(@.status=='False')].message}"

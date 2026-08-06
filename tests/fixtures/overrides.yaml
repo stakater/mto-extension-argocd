@@ -1,0 +1,97 @@
+# C2 -- the four per-tenant overrides, and the nil-vs-empty distinction.
+#
+# Chart defaults are deliberately non-empty here, so inheritance is visible in
+# the golden rather than indistinguishable from "nothing was set".
+#
+# What each tenant pins:
+#   inherit        absent annotation inherits the chart default (S22/S23).
+#                  This is the most common production setup, and the one the
+#                  old e2e suite claimed to cover with an inverted, vacuous
+#                  assertion -- it Get's with an empty namespace, so the call
+#                  always errors, then asserts err != nil.
+#   emptied        an explicit "[]" overrides with empty, and the field is then
+#                  omitted from the AppProject entirely. Distinguishing this
+#                  from `inherit` is the whole point of passing the annotation
+#                  value down verbatim.
+#   explicit       a real override replaces the default rather than merging.
+#   malformed      broken JSON fails THIS child and no other. It must never
+#                  fall back to the default: applies are server-side with
+#                  ForceOwnership, so a silent fallback would strip the field
+#                  from a live AppProject.
+#   bad-purge      "True" is not "true". Read leniently it would silently mean
+#                  the opposite of what the author intended, on the one setting
+#                  that decides whether an AppProject survives deletion.
+#
+# The golden proves the isolation: malformed and bad-purge are absent from it,
+# every other tenant rendered.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    clusterResourceWhitelist:
+      - { group: "", kind: Namespace }
+      - { group: tronador.stakater.com, kind: EnvironmentProvisioner }
+    namespaceResourceBlacklist:
+      - { group: "", kind: ResourceQuota }
+  scaffolding:
+    mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-malformed: "invalid character"
+  mto-argocd-tenant-bad-purge: 'on-delete-purge must be exactly "true" or "false"'
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: inherit
+      spec:
+        accessControl:
+          owners: { groups: [inherit-owners] }
+
+    - metadata:
+        name: emptied
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: "[]"
+          argocd.tenantoperator.stakater.com/namespace-resource-blacklist: "[]"
+      spec:
+        accessControl:
+          owners: { groups: [emptied-owners] }
+
+    - metadata:
+        name: explicit
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: '[{"group":"","kind":"PersistentVolume"}]'
+          argocd.tenantoperator.stakater.com/namespace-resource-blacklist: '[{"group":"","kind":"LimitRange"}]'
+          argocd.tenantoperator.stakater.com/on-delete-purge: "true"
+      spec:
+        accessControl:
+          owners: { groups: [explicit-owners] }
+
+    - metadata:
+        name: malformed
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: "{not json"
+      spec:
+        accessControl:
+          owners: { groups: [malformed-owners] }
+
+    - metadata:
+        name: bad-purge
+        annotations:
+          argocd.tenantoperator.stakater.com/on-delete-purge: "True"
+      spec:
+        accessControl:
+          owners: { groups: [bad-purge-owners] }
+
+  namespaces:
+    - metadata: { name: inherit-dev, labels: { stakater.com/tenant: inherit } }
+    - metadata: { name: emptied-dev, labels: { stakater.com/tenant: emptied } }
+    - metadata: { name: explicit-dev, labels: { stakater.com/tenant: explicit } }
+    - metadata: { name: malformed-dev, labels: { stakater.com/tenant: malformed } }
+    - metadata: { name: bad-purge-dev, labels: { stakater.com/tenant: bad-purge } }

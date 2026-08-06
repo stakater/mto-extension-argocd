@@ -1,0 +1,202 @@
+# Namespace holding this chart's template-operator-v2 objects: the two
+# Templates, the parent TemplateInstance, and every child TemplateInstance the
+# parent renders.
+#
+# Nothing requires this to be any particular namespace. templateRef carries an
+# explicit namespace and template-operator-v2 resolves it cross-namespace, and
+# the three other namespaces in play are separate values: where the operator
+# itself runs (rbac.serviceAccount.namespace), where the IntegrationConfig
+# lives (integrationConfig.namespace), and where the AppProjects go
+# (argocd.namespace).
+#
+# It defaults to multi-tenant-operator only because that namespace is already
+# a prerequisite -- the IntegrationConfig is there -- and this chart creates no
+# namespace, so pointing it somewhere new fails the install unless you create
+# that namespace first.
+operatorNamespace: multi-tenant-operator
+
+argocd:
+  # REQUIRED, and enforced by values.schema.json with minLength 1.
+  #
+  # The namespace ArgoCD runs in. Every AppProject is created here, and it is
+  # always present in every tenant's destinations (S19), including when it
+  # matches a privileged pattern.
+  #
+  # A blank value does NOT render zero children -- $argoNs never gates emission.
+  # It renders one child per tenant, each producing an AppProject with an empty
+  # namespace, which the API server rejects. Every tenant breaks at once. The
+  # schema's minLength is the only thing standing between a typo and that
+  # outcome; do not relax it. Formerly read from IntegrationConfig .spec.integrations.argocd
+  # .namespace, which is deprecated.
+  namespace: ""
+
+  # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
+  # a Tenant may override it with the cluster-resource-whitelist annotation.
+  # Empty here and absent on the Tenant means the field is omitted from the
+  # AppProject entirely -- which ArgoCD reads as "no cluster-scoped resources".
+  #
+  # Formerly IntegrationConfig .spec.integrations.argocd.clusterResourceWhitelist
+  # (deprecated). Seed this from the live IntegrationConfig at migration time or
+  # the Phase 2 equivalence diff is non-empty by construction.
+  clusterResourceWhitelist: []
+  #  - group: ""
+  #    kind: Namespace
+
+  # Namespaced kinds every tenant's AppProject may NOT manage. Same override and
+  # migration rules as clusterResourceWhitelist.
+  namespaceResourceBlacklist: []
+  #  - group: ""
+  #    kind: ResourceQuota
+
+  sourceRepos:
+    # Git repositories a tenant's Applications may deploy from. There is no safe
+    # shared default: one org-wide value lets every tenant deploy from every
+    # other tenant's repos, so the only shareable form is a per-tenant pattern.
+    #
+    # `{{ tenant }}` is expanded to the tenant's name. A pattern with no
+    # placeholder is simply a literal, which is why no separate `literal:` key
+    # exists yet.
+    #
+    #   pattern: https://github.com/acme/{{ tenant }}-gitops
+    #
+    # Ships EMPTY on purpose: a shipped default would add a field to every
+    # existing AppProject that did not have one and break the Phase 2
+    # byte-identical diff. A Tenant may override with the source-repos
+    # annotation.
+    pattern: ""
+
+# Which Tenants get an AppProject.
+scaffolding:
+  # Always | OnLabel | OnAnnotation | Never
+  #
+  # Defaults to OnAnnotation so that installing the chart does nothing until a
+  # Tenant is explicitly opted in. This is the replacement for creating an
+  # Extensions CR: same decision, different home.
+  #
+  # Changing this value to a narrower mode reaps the children it excludes, and
+  # reaping a child deletes its AppProject (until TOV2-1 lands). Treat a change
+  # here as a delete.
+  mode: OnAnnotation
+
+  # The annotation key checked in OnAnnotation mode, and its expected value.
+  # Configurable so the match key is the platform team's choice.
+  annotations:
+    enabled: argocd.tenantoperator.stakater.com/enabled
+
+  # The label key checked in OnLabel mode.
+  labels:
+    enabled: argocd.tenantoperator.stakater.com/enabled
+
+# Annotation keys read off each Tenant for the four per-tenant overrides.
+# Absent annotation inherits the chart default above; an explicit `[]`
+# overrides with empty. Malformed JSON fails that tenant's child rather than
+# falling back -- applies are server-side, so a silent fallback would strip the
+# field from a live AppProject.
+annotations:
+  sourceRepos: argocd.tenantoperator.stakater.com/source-repos
+  clusterResourceWhitelist: argocd.tenantoperator.stakater.com/cluster-resource-whitelist
+  namespaceResourceBlacklist: argocd.tenantoperator.stakater.com/namespace-resource-blacklist
+  onDeletePurge: argocd.tenantoperator.stakater.com/on-delete-purge
+
+# The IntegrationConfig the parent reads. Supplies accessControl.privileged
+# only -- privileged namespaces (excluded from every tenant's destinations) and
+# privileged groups (added to every role). Those are core MTO config with five
+# non-ArgoCD consumers, so they are NOT part of the integrations.argocd
+# deprecation.
+#
+# This parameter deliberately carries no defaultValue. Masking a failed read
+# would yield an empty privileged list, putting privileged namespaces into
+# tenants' destinations -- cross-tenant exposure. Failing the parent is
+# fail-closed, and matches MTO's own [".*"] fallback.
+integrationConfig:
+  name: tenant-operator-config
+  namespace: multi-tenant-operator
+
+# The label a Namespace carries to belong to a tenant.
+tenantNamespaceLabel: stakater.com/tenant
+
+# Drift repair on rendered AppProjects.
+sync:
+  # off | revert | strict
+  #
+  #   off     created once, never enforced
+  #   revert  the controller reverts external edits back to the rendered state
+  #   strict  revert, PLUS an admission webhook that refuses UPDATE and DELETE
+  #           on rendered AppProjects outright
+  #
+  # Defaults to `strict`, and the difference is not cosmetic. Under `revert`,
+  # deleting a rendered AppProject wedges it: template-operator-v2's finalizer
+  # is never released, its drift check reports "No drift detected" because the
+  # spec still matches, and the owning TemplateInstance goes on reporting
+  # Ready=True while ArgoCD refuses to use a Terminating project. Reproduced on
+  # a live cluster; see docs/upstream-issues.md (TOV2-2).
+  #
+  # Under `strict` the delete is simply denied:
+  #
+  #   Error from server (Forbidden): admission webhook
+  #   "sync-enforcement.templates.v2.stakater.com" denied the request: resource
+  #   is managed by sync-enabled TemplateInstance ...; deletion is not allowed
+  #
+  # Teardown is not blocked by the webhook: it allows the delete once the
+  # owning TemplateInstance is itself being deleted, so descaffolding a tenant
+  # and uninstalling are both permitted -- verified on the same cluster. They
+  # still have to be done in the right ORDER, for an unrelated reason: see
+  # NOTES.txt and TOV2-5.
+  #
+  # Two costs, both real:
+  #
+  #  1. Nobody can hand-edit or delete a managed AppProject any more, including
+  #     you. That is drift protection working as intended, but it is stricter
+  #     than ExtensionsArgoCDReconciler, which let an edit through and
+  #     reconciled it away afterwards. To intervene: fix the Tenant annotation
+  #     or the chart values, or `helm upgrade --set sync.mode=revert`, fix, and
+  #     set it back.
+  #
+  #  2. Enforcement depends on template-operator-v2's webhook being reachable.
+  #     Its failurePolicy is Fail, so while the operator is down, updates and
+  #     deletes to resources it MANAGES are rejected. The blast radius stops
+  #     there: the webhook carries a matchConditions CEL filter on the
+  #     `templates.v2.stakater.com/instance` label, so the API server never
+  #     consults it for anything else.
+  #
+  # ArgoCD writing AppProject status is NOT blocked: `status` is in
+  # template-operator-v2's ServerManagedFields and always stripped before
+  # comparison.
+  mode: strict
+
+  # Both exemptions are load-bearing under `strict`. Removing either breaks
+  # something that is not drift.
+  ignoreFields:
+    # template-operator-v2 manages its own finalizer on the AppProject through
+    # an ordinary UPDATE. Without this the webhook locks the operator out of
+    # its own object and nothing can ever be torn down.
+    - metadata.finalizers
+
+    # ArgoCD writes project role tokens into the SPEC -- `argocd proj role
+    # create-token <proj> <role>`, the normal way to mint a token for a CI
+    # pipeline, appends to spec.roles[].jwtTokens. status.jwtTokensByRole is
+    # only a mirror, and status is stripped automatically; the spec field is
+    # not. Without this exemption strict denies a supported ArgoCD workflow.
+    #
+    # Exempting it is safe: this chart never renders jwtTokens, and
+    # server-side apply only owns the fields it sets, so tokens survive every
+    # re-render regardless.
+    - spec.roles[*].jwtTokens
+
+# Default for whether deleting a Tenant (or descaffolding it) deletes its
+# AppProject. False means retain. Overridable per Tenant with the
+# on-delete-purge annotation.
+#
+# NOTE: retain is not yet enforceable -- template-operator-v2 deletes every
+# rendered resource unconditionally on child deletion (TOV2-1). Until that
+# lands this value documents intent only.
+onDeletePurgeAppProject: false
+
+rbac:
+  # Create the ClusterRoles/Bindings that let template-operator-v2 manage
+  # AppProjects. Turn off only if you bind them yourself.
+  create: true
+  # The ServiceAccount template-operator-v2 runs as.
+  serviceAccount:
+    name: template-operator-v2
+    namespace: stakater-template-operator

@@ -1,0 +1,63 @@
+# The OnLabel branch of the scaffolding filter, and what a near-miss marker
+# value does.
+#
+# Only `opted-in` appears in the golden. The other three prove:
+#
+#   near-miss-True  "True" is not "true", so the tenant is NOT scaffolded.
+#   near-miss-yes   nor is "yes".
+#   annotated-only  in OnLabel mode the annotation is inert -- the two maps are
+#                   selected by scaffolding.mode, never OR'd.
+#
+# A near-miss cannot be made to fail loudly here, and that is a deliberate
+# limitation rather than an oversight: this marker decides whether a child is
+# emitted at all, so there is no child to carry the error, and failing the
+# parent would take every other tenant's AppProject down over one tenant's
+# typo. Matching leniently would be worse -- it would silently scaffold
+# tenants nobody opted in. So the behaviour is pinned here instead, and the
+# consequence is documented in values.yaml: a marker that is not exactly
+# "true" reads as opted out, and switching modes without moving the marker
+# reaps the AppProjects it excludes.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+  scaffolding:
+    mode: OnLabel
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: opted-in
+        labels:
+          argocd.tenantoperator.stakater.com/enabled: "true"
+      spec: {}
+
+    - metadata:
+        name: near-miss-True
+        labels:
+          argocd.tenantoperator.stakater.com/enabled: "True"
+      spec: {}
+
+    - metadata:
+        name: near-miss-yes
+        labels:
+          argocd.tenantoperator.stakater.com/enabled: "yes"
+      spec: {}
+
+    - metadata:
+        name: annotated-only
+        annotations:
+          argocd.tenantoperator.stakater.com/enabled: "true"
+      spec: {}
+
+  namespaces:
+    - metadata: { name: opted-in-dev, labels: { stakater.com/tenant: opted-in } }
+    - metadata: { name: near-miss-True-dev, labels: { stakater.com/tenant: near-miss-True } }
+    - metadata: { name: near-miss-yes-dev, labels: { stakater.com/tenant: near-miss-yes } }
+    - metadata: { name: annotated-only-dev, labels: { stakater.com/tenant: annotated-only } }

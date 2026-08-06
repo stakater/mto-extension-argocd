@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "mto-extension-argocd values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operatorNamespace",
+    "argocd",
+    "scaffolding",
+    "annotations",
+    "integrationConfig",
+    "tenantNamespaceLabel",
+    "sync",
+    "rbac"
+  ],
+  "properties": {
+    "global": {
+      "type": "object",
+      "description": "Helm injects this when the chart is used as a subchart. Declared so additionalProperties:false does not reject it."
+    },
+    "operatorNamespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Namespace the Templates and the parent TemplateInstance are installed into."
+    },
+    "argocd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "sourceRepos"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "REQUIRED. Namespace ArgoCD runs in. A blank value does not render zero children -- it renders one per tenant, each emitting an AppProject with an empty namespace that the API server rejects, so every tenant breaks at once. This minLength is the guard."
+        },
+        "clusterResourceWhitelist": {
+          "$ref": "#/definitions/groupKindList"
+        },
+        "namespaceResourceBlacklist": {
+          "$ref": "#/definitions/groupKindList"
+        },
+        "sourceRepos": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Per-tenant repo pattern; {{ tenant }} is expanded to the tenant name. Empty means no sourceRepos unless a Tenant sets the annotation."
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    "scaffolding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "annotations",
+        "labels"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "OnLabel",
+            "OnAnnotation",
+            "Never"
+          ]
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        }
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRepos",
+        "clusterResourceWhitelist",
+        "namespaceResourceBlacklist",
+        "onDeletePurge"
+      ],
+      "properties": {
+        "sourceRepos": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clusterResourceWhitelist": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespaceResourceBlacklist": {
+          "type": "string",
+          "minLength": 1
+        },
+        "onDeletePurge": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "integrationConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "namespace"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tenantNamespaceLabel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "revert",
+            "strict"
+          ]
+        },
+        "ignoreFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "onDeletePurgeAppProject": {
+      "type": "boolean",
+      "description": "null renders value: \"<nil>\", which fails every child with an error that points at the tenant's annotation rather than at this value."
+    },
+    "rbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "create",
+        "serviceAccount"
+      ],
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "namespace"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "groupKindList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group",
+          "kind"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

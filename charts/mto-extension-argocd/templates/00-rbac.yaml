@@ -1,0 +1,159 @@
+{{- /*
+RBAC for the template-operator-v2 ServiceAccount. Least privilege, split by
+verb and scope -- verified working on a live cluster, including deletion:
+template-operator-v2 created and deleted AppProjects in the ArgoCD namespace
+through the RoleBinding below while create/delete in other namespaces stayed
+denied and the cluster-wide list still worked.
+
+This ships in the chart rather than being rendered through template-operator-v2
+because anything whose admission check references another object cannot be
+co-rendered with it -- template-operator-v2 dry-runs the whole render, and a
+RoleBinding is admitted against a Role that does not exist yet.
+*/ -}}
+{{- if .Values.rbac.create }}
+{{- $sa := .Values.rbac.serviceAccount }}
+{{- /* Cluster-scoped names are release-scoped. Fixed names mean a second
+       install anywhere on the cluster fails with "invalid ownership metadata",
+       and an uninstall of either release revokes the other's grants. */ -}}
+{{- $prefix := printf "%s-%s" .Release.Name .Release.Namespace }}
+---
+{{- /* Cluster-wide reads. The parent's two LIST parameters need these, and
+       discoverOwnedResources LISTs AppProjects cluster-wide -- which is why
+       list/watch on appprojects cannot be narrowed to the ArgoCD namespace
+       even though every AppProject lives there. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $prefix }}-argocd-observe
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["tenantoperator.stakater.com"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $prefix }}-argocd-observe
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $prefix }}-argocd-observe
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa.name }}
+    namespace: {{ $sa.namespace }}
+---
+{{- /* Mutating verbs on AppProjects, granted only inside the ArgoCD namespace.
+
+       The reap verbs are unconditional and `create` is gated separately. That
+       split is load-bearing: gating the whole block behind the toggle means
+       switching scaffolding off leaves template-operator-v2 unable to delete
+       the AppProjects it already owns, and the child TemplateInstance
+       finalizer then blocks forever. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $prefix }}-argocd-write
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["get", "update", "patch", "delete"]
+  {{- if ne .Values.scaffolding.mode "Never" }}
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $prefix }}-argocd-write
+  namespace: {{ .Values.argocd.namespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $prefix }}-argocd-write
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa.name }}
+    namespace: {{ $sa.namespace }}
+---
+{{- /* The parent renders child TemplateInstances, all of them in
+       operatorNamespace. Same reap-verbs/create split, same reason. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mto-extension-argocd-children
+  namespace: {{ .Values.operatorNamespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["templates.v2.stakater.com"]
+    resources: ["templateinstances"]
+    verbs: ["get", "list", "watch", "update", "patch", "delete"]
+  {{- if ne .Values.scaffolding.mode "Never" }}
+  - apiGroups: ["templates.v2.stakater.com"]
+    resources: ["templateinstances"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mto-extension-argocd-children
+  namespace: {{ .Values.operatorNamespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mto-extension-argocd-children
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa.name }}
+    namespace: {{ $sa.namespace }}
+---
+{{- /* The IntegrationConfig is a namespaced singleton, so read access is
+       namespace-scoped. It supplies accessControl.privileged only. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mto-extension-argocd-integrationconfig-read
+  namespace: {{ .Values.integrationConfig.namespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["tenantoperator.stakater.com"]
+    resources: ["integrationconfigs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mto-extension-argocd-integrationconfig-read
+  namespace: {{ .Values.integrationConfig.namespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mto-extension-argocd-integrationconfig-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa.name }}
+    namespace: {{ $sa.namespace }}
+{{- end }}

@@ -1,0 +1,68 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: shares-argo-ns
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: shares-argo-ns-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-owner-group-7f194a
+        - ops@example.com
+      name: shares-argo-ns-owner
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, *, *, shares-argo-ns/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-edit-group-a20c52
+      name: shares-argo-ns-edit
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, *, *, shares-argo-ns/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-view-group-6a5bd7
+      name: shares-argo-ns-view
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-view, *, get, shares-argo-ns/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: no-namespaces
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-namespaces-owner-group-e5ca7c
+        - ops@example.com
+      name: no-namespaces-owner
+      policies:
+        - p, proj:no-namespaces:no-namespaces-owner, *, *, no-namespaces/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-namespaces-edit-group-71c06d
+      name: no-namespaces-edit
+      policies:
+        - p, proj:no-namespaces:no-namespaces-edit, *, *, no-namespaces/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-namespaces-view-group-bcdc56
+      name: no-namespaces-view
+      policies:
+        - p, proj:no-namespaces:no-namespaces-view, *, get, no-namespaces/*, allow

@@ -1,0 +1,11 @@
+# The smallest working install.
+#
+# argocd.namespace is the only required value. Everything else defaults, and
+# scaffolding.mode defaults to OnAnnotation -- so installing this renders no
+# AppProjects at all until a Tenant is annotated:
+#
+#   kubectl annotate tenant my-tenant \
+#     argocd.tenantoperator.stakater.com/enabled=true
+
+argocd:
+  namespace: openshift-gitops

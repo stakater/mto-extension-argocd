@@ -1,0 +1,215 @@
+# Spike: does one parent TemplateInstance carry THREE objectFieldRef params
+# (two cluster-wide LISTs + one namespaced GET) and register watches for all?
+#
+# Renders AppProjects named spike-<tenant> so it never fights the live
+# ExtensionsArgoCDReconciler over AppProject/pe.
+---
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: Template
+metadata:
+  name: spike-argocd-child
+  namespace: stakater-tenant-operator
+spec:
+  parameters:
+    - name: tenant
+      required: true
+      exposeInStatus: true
+    - name: argoNamespace
+      required: true
+    - name: namespacesJson
+      value: "[]"
+      exposeInStatus: true
+    - name: whitelistJson
+      value: "[]"
+    - name: blacklistJson
+      value: "[]"
+    - name: privilegedGroupsJson
+      value: "[]"
+    - name: tenantGroupsJson
+      value: '{"owner":[],"edit":[],"view":[]}'
+  gotemplate: |
+    {{- $t := .parameters.tenant }}
+    {{- $argoNs := .parameters.argoNamespace }}
+    {{- $nsList := fromJson .parameters.namespacesJson }}
+    {{- $wl := fromJson .parameters.whitelistJson }}
+    {{- $bl := fromJson .parameters.blacklistJson }}
+    {{- $priv := fromJson .parameters.privilegedGroupsJson }}
+    {{- $tg := fromJson .parameters.tenantGroupsJson }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: AppProject
+    metadata:
+      name: spike-{{ $t }}
+      namespace: {{ $argoNs }}
+    spec:
+      description: Managed by Extensions controller
+      destinations:
+      {{- range $ns := $nsList }}
+        - namespace: {{ $ns }}
+          server: https://kubernetes.default.svc
+      {{- end }}
+        - namespace: {{ $argoNs }}
+          server: https://kubernetes.default.svc
+      {{- if $wl }}
+      clusterResourceWhitelist:
+      {{- range $i := $wl }}
+        - group: {{ $i.group | quote }}
+          kind: {{ $i.kind }}
+      {{- end }}
+      {{- end }}
+      {{- if $bl }}
+      namespaceResourceBlacklist:
+      {{- range $i := $bl }}
+        - group: {{ $i.group | quote }}
+          kind: {{ $i.kind }}
+      {{- end }}
+      {{- end }}
+      roles:
+      {{- range $role := list "owner" "edit" "view" }}
+        {{- $hash := sha256sum (printf "%s-%s" $t $role) | trunc 6 }}
+        {{- $verb := ternary "get" "*" (eq $role "view") }}
+        - name: {{ $t }}-{{ $role }}
+          description: >-
+            Role that gives {{ if eq $role "owner" }}full{{ else }}{{ $role }}{{ end }} access to all
+            resources inside the tenant's namespace to the tenant owner group
+          policies:
+            - "p, proj:{{ $t }}:{{ $t }}-{{ $role }}, *, {{ $verb }}, {{ $t }}/*, allow"
+          groups:
+            - {{ $t }}-{{ $role }}-group-{{ $hash }}
+          {{- range $g := $priv }}
+            - {{ $g }}
+          {{- end }}
+          {{- range $g := (index $tg $role) }}
+            - {{ $g }}
+          {{- end }}
+      {{- end }}
+  outputs:
+    - name: appproject
+      from:
+        apiVersion: argoproj.io/v1alpha1
+        kind: AppProject
+        name: "spike-{.parameters.tenant}"
+        namespace: "{.parameters.argoNamespace}"
+      fields:
+        - { name: destinationCount, jsonPath: "{.spec.destinations[*].namespace}" }
+---
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: Template
+metadata:
+  name: spike-argocd-parent
+  namespace: stakater-tenant-operator
+spec:
+  parameters:
+    - name: tenants
+      exposeInStatus: false
+    - name: namespaces
+      exposeInStatus: false
+    - name: integrationConfig
+      exposeInStatus: false
+    - name: operatorNamespace
+      value: stakater-tenant-operator
+    - name: scaffoldingMode
+      value: Always
+  gotemplate: |
+    {{- $opNs := .parameters.operatorNamespace }}
+    {{- $mode := .parameters.scaffoldingMode }}
+    {{- $ic := .parameters.integrationConfig }}
+    {{- $argo := dig "integrations" "argocd" dict $ic }}
+    {{- $argoNs := $argo.namespace | default "" }}
+    {{- $priv := dig "accessControl" "privileged" dict $ic }}
+    {{- $privNs := $priv.namespaces | default list }}
+    {{- $privGroups := $priv.groups | default list }}
+    {{- $wl := $argo.clusterResourceWhitelist | default list }}
+    {{- $bl := $argo.namespaceResourceBlacklist | default list }}
+    {{- if $argoNs }}
+    {{- range $t := .parameters.tenants }}
+    {{- $name := $t.metadata.name }}
+    {{- $labels := default dict $t.metadata.labels }}
+    {{- $take := false }}
+    {{- if eq $mode "Always" }}{{- $take = true }}
+    {{- else if eq $mode "OnAnnotation" }}
+    {{- $annos := default dict $t.metadata.annotations }}
+    {{- $take = eq (index $annos "tenantoperator.stakater.com/argocd") "true" }}
+    {{- end }}
+    {{- if $take }}
+    {{- $mine := list }}
+    {{- range $ns := $.parameters.namespaces }}
+    {{- $nsLabels := default dict $ns.metadata.labels }}
+    {{- if eq (index $nsLabels "stakater.com/tenant") $name }}
+    {{- $isPriv := false }}
+    {{- range $p := $privNs }}{{- if regexMatch $p $ns.metadata.name }}{{- $isPriv = true }}{{- end }}{{- end }}
+    {{- if not $isPriv }}{{- $mine = append $mine $ns.metadata.name }}{{- end }}
+    {{- end }}
+    {{- end }}
+    {{- $ac := default dict $t.spec.accessControl }}
+    {{- $tg := dict
+          "owner" ((dig "owners" "groups" list $ac))
+          "edit"  ((dig "editors" "groups" list $ac))
+          "view"  ((dig "viewers" "groups" list $ac)) }}
+    ---
+    apiVersion: templates.v2.stakater.com/v2alpha1
+    kind: TemplateInstance
+    metadata:
+      name: spike-argocd-{{ $name }}
+      namespace: {{ $opNs }}
+    spec:
+      templateRef:
+        name: spike-argocd-child
+        namespace: {{ $opNs }}
+      parameters:
+        - name: tenant
+          value: {{ $name | quote }}
+        - name: argoNamespace
+          value: {{ $argoNs | quote }}
+        - name: namespacesJson
+          value: {{ toJson $mine | quote }}
+        - name: whitelistJson
+          value: {{ toJson $wl | quote }}
+        - name: blacklistJson
+          value: {{ toJson $bl | quote }}
+        - name: privilegedGroupsJson
+          value: {{ toJson $privGroups | quote }}
+        - name: tenantGroupsJson
+          value: {{ toJson $tg | quote }}
+    {{- end }}
+    {{- end }}
+    {{- end }}
+  outputs:
+    - name: tenants
+      fromAll:
+        apiVersion: templates.v2.stakater.com/v2alpha1
+        kind: TemplateInstance
+        namespace: stakater-tenant-operator
+      keyTemplate: "{.metadata.name}"
+      fields:
+        - { name: tiReady, jsonPath: "{.status.conditions[?(@.type=='Ready')].status}" }
+---
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: TemplateInstance
+metadata:
+  name: spike-argocd-parent
+  namespace: stakater-tenant-operator
+spec:
+  templateRef:
+    name: spike-argocd-parent
+    namespace: stakater-tenant-operator
+  parameters:
+    - name: tenants
+      valueFrom:
+        objectFieldRef:
+          apiVersion: tenantoperator.stakater.com/v1beta3
+          kind: Tenant
+          jsonPath: .items
+    - name: namespaces
+      valueFrom:
+        objectFieldRef:
+          apiVersion: v1
+          kind: Namespace
+          jsonPath: .items
+    - name: integrationConfig
+      valueFrom:
+        objectFieldRef:
+          apiVersion: tenantoperator.stakater.com/v1beta1
+          kind: IntegrationConfig
+          name: tenant-operator-config
+          namespace: stakater-tenant-operator
+          jsonPath: .spec

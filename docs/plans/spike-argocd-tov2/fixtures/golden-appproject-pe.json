@@ -1,0 +1,108 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "AppProject",
+  "metadata": {
+    "labels": {
+      "multi-tenant-operator/predicate": ""
+    },
+    "name": "pe",
+    "namespace": "stakater-tenant-operator"
+  },
+  "spec": {
+    "clusterResourceWhitelist": [
+      {
+        "group": "tronador.stakater.com",
+        "kind": "EnvironmentProvisioner"
+      },
+      {
+        "group": "",
+        "kind": "PersistentVolume"
+      }
+    ],
+    "description": "Managed by Extensions controller",
+    "destinations": [
+      {
+        "namespace": "xt-a",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "demo-consumer",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "demo-provider",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "curity-operator",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "pe-payments",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "pe-batch",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "xt-b",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "curity-db-demo",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "spike-metrics-test",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "xt-c",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "stakater-tenant-operator",
+        "server": "https://kubernetes.default.svc"
+      }
+    ],
+    "namespaceResourceBlacklist": [
+      {
+        "group": "",
+        "kind": "ResourceQuota"
+      }
+    ],
+    "roles": [
+      {
+        "description": "Role that gives full access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-owner-group-489fab"
+        ],
+        "name": "pe-owner",
+        "policies": [
+          "p, proj:pe:pe-owner, *, *, pe/*, allow"
+        ]
+      },
+      {
+        "description": "Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-edit-group-c49e02"
+        ],
+        "name": "pe-edit",
+        "policies": [
+          "p, proj:pe:pe-edit, *, *, pe/*, allow"
+        ]
+      },
+      {
+        "description": "Role that gives view access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-view-group-84b727"
+        ],
+        "name": "pe-view",
+        "policies": [
+          "p, proj:pe:pe-view, *, get, pe/*, allow"
+        ]
+      }
+    ]
+  }
+}

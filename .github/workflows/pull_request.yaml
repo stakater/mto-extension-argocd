@@ -1,0 +1,38 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches: [main]
+    # Deliberately NOT ignoring docs/**. The equivalence test reads its
+    # reference data from docs/plans/spike-argocd-tov2/fixtures/ -- the captured
+    # output of the Go controller, which cannot be regenerated because ArgoCD
+    # has been removed from the cluster that produced it. Ignoring docs/ would
+    # let a change to that data skip every job.
+    paths-ignore:
+      - '*.md'
+      - 'examples/**'
+
+jobs:
+  # No image and no private module dependencies -- the Go module here exists
+  # only for the render tests and pulls sprig and yaml.v3, both public. So no
+  # STAKATER_AB_REPOS auth is needed.
+  chart-tests:
+    name: Chart Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Lint chart, vet and run render tests
+        run: HELM=helm make helm-lint vet helm-render-test
+
+      # Stands up a real kube-apiserver with template-operator-v2's CRDs and
+      # checks the objects the chart renders are actually accepted -- the
+      # structural schema plus the CEL rules. No cluster required.
+      - name: Admission tests
+        run: HELM=helm make admission-test

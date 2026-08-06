@@ -1,0 +1,15 @@
+{
+  "tenant": "pe",
+  "labelledNamespaces": [
+    "curity-db-demo",
+    "curity-operator",
+    "demo-consumer",
+    "demo-provider",
+    "pe-batch",
+    "pe-payments",
+    "spike-metrics-test",
+    "xt-a",
+    "xt-b",
+    "xt-c"
+  ]
+}
