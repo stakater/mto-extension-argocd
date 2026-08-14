@@ -34,6 +34,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,8 +43,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 )
-
-const chartDir = "../../charts/mto-extension-argocd"
 
 var cfg *rest.Config
 
@@ -184,9 +183,9 @@ func createNamespace(t *testing.T, c client.Client, ctx context.Context, name st
 
 func renderChart(t *testing.T, sets []string, values string) []*unstructured.Unstructured {
 	t.Helper()
-	helm := os.Getenv("HELM")
-	if helm == "" {
-		helm = "helm"
+	chartDir, err := helm.ChartDir()
+	if err != nil {
+		t.Fatalf("resolving chart dir: %v", err)
 	}
 	args := []string{"template", "argocd", chartDir}
 	if values != "" {
@@ -199,7 +198,7 @@ func renderChart(t *testing.T, sets []string, values string) []*unstructured.Uns
 	for _, s := range sets {
 		args = append(args, "--set", s)
 	}
-	out, err := exec.Command(helm, args...).CombinedOutput()
+	out, err := exec.Command(helm.Bin(), args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}

@@ -28,11 +28,25 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.3
-      - name: Lint chart, vet and run render tests
-        run: HELM=helm make helm-lint vet helm-render-test
-
-      # Stands up a real kube-apiserver with template-operator-v2's CRDs and
-      # checks the objects the chart renders are actually accepted -- the
-      # structural schema plus the CEL rules. No cluster required.
-      - name: Admission tests
-        run: HELM=helm make admission-test
+      # One step, calling the same aggregate target a developer runs locally.
+      # This used to be three steps naming the individual targets, which meant
+      # `make test` and CI were two hand-maintained lists of the same thing: a
+      # target added to one would silently not run in the other, and CI would
+      # stay green with the coverage simply absent. Each sub-target still echoes
+      # its own command, so a failed run still says which one broke.
+      #
+      # What it covers:
+      #   helm-lint         the chart lints strict
+      #   vet               go vet, plus a gofmt check
+      #   helm-render-test  both gotemplates executed against fixtures, output
+      #                     diffed against the golden AppProjects
+      #   migrate-test      hack/mto-argocd-migrate against a fake kubectl. It
+      #                     writes to production clusters, so the properties
+      #                     pinned are the ones it must never violate: no write
+      #                     without --apply, retain before delete, and never a
+      #                     `delete appproject`.
+      #   admission-test    a real kube-apiserver carrying template-operator-v2's
+      #                     CRDs accepts what the chart renders -- structural
+      #                     schema plus CEL rules. No cluster required.
+      - name: Lint, vet and test
+        run: HELM=helm make test

@@ -13,12 +13,19 @@ CRD in [multi-tenant-operator][mto].
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Migrating an existing cluster](#migrating-an-existing-cluster)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
 - [Before production](#before-production)
 - [Operations](#operations)
 - [Development](#development)
 - [Differences from the Extensions controller](#differences-from-the-extensions-controller)
+
+> [!IMPORTANT]
+> **Already running `ExtensionsArgoCDReconciler` with live tenants?** Do not
+> follow the quick start. Follow [MIGRATION.md](MIGRATION.md) — the order in
+> which the old CRs are drained is load-bearing, and getting it wrong deletes
+> `AppProject`s or wedges the CRD.
 
 ## What you get
 
@@ -113,6 +120,36 @@ A complete, commented pair of examples lives in
 [examples/tenant.yaml](examples/tenant.yaml) and
 [examples/values-production.yaml](examples/values-production.yaml).
 
+## Migrating an existing cluster
+
+If `ExtensionsArgoCDReconciler` is already serving real tenants, the quick start
+above is the wrong entry point. Read [MIGRATION.md](MIGRATION.md) instead — it
+is a tenant-by-tenant runbook that adopts every existing `AppProject` in place,
+with no delete and no window where two writers own the same object.
+
+```bash
+hack/mto-argocd-migrate --context "$CTX" --operator-namespace <mto-ns> run
+```
+
+One command, run repeatedly. It reads the cluster, shows a checklist, and gives
+you one next action — the exact YAML to commit, or a cluster-only step it does
+itself. Everything is a dry run until you pass `--apply`, and it never writes to
+a `Tenant` or an `Extensions` CR: those live in Git, so it prints them for you to
+commit.
+
+Three constraints shape the order, and none of them are obvious:
+
+- The `Extensions` finalizer is released **only** by the controller being
+  removed, so the CRs have to be deleted while it still runs.
+- Deleting a CR with `onDeletePurgeAppProject: true` destroys the live
+  `AppProject`.
+- With `sync.mode: strict` the chart wins any contest with the old controller,
+  which then error-loops on the `Extensions` CR where nobody is looking.
+
+So each tenant goes: patch to retain → delete its `Extensions` CR → annotate the
+`Tenant`. The old controller stays up for the whole migration and is removed
+last.
+
 ## How it works
 
 The chart installs three objects and nothing else:
@@ -196,13 +233,14 @@ refused at install time rather than shipped into a live AppProject.
 
 Four ways to end up with something that looks correct and isn't.
 
-**Do not scaffold a tenant that still has an `Extensions` CR.** While
-`ExtensionsArgoCDReconciler` runs it owns that tenant's AppProject. With
+**Do not scaffold a tenant that still has an `Extensions` CR.** While that CR
+exists, `ExtensionsArgoCDReconciler` owns the tenant's AppProject. With
 `sync.mode: strict` this chart wins and the old controller enters a permanent
 error-retry loop; the failure surfaces on the `Extensions` CR where nobody is
-looking. Turn the controller off *before* opting anyone in. `scaffolding.mode:
-Always` opts in every tenant at once, which is the easy way to do this by
-accident.
+looking. Delete the tenant's CR *first* — not the controller, which still has to
+be running to release the CR's finalizer. That is what
+[MIGRATION.md](MIGRATION.md) sequences, and `scaffolding.mode: Always` opts in
+every tenant at once, which is the easy way to get it wrong by accident.
 
 **Seed the resource lists from the IntegrationConfig.**
 `clusterResourceWhitelist` and `namespaceResourceBlacklist` moved out of
@@ -295,6 +333,7 @@ Four layers, each catching what the one above it structurally cannot:
 |---|---|---|
 | `helm lint` | — | chart structure |
 | `tests/render` | — | wrong AppProject content, invariants over random input, scale |
+| `tests/migrate` | — | the migration script writing when it should not, or in the wrong order |
 | `tests/admission` | envtest binaries | Template CRs the API server would reject — schema and CEL |
 | `tests/e2e` | a live cluster | what template-operator-v2 does once objects are applied |
 
@@ -310,6 +349,14 @@ Fixtures in `tests/fixtures/` are discovered, not enumerated — adding a file i
 enough to make it a test. Alongside them, `property_test.go` asserts invariants
 over randomly generated clusters, fuzzes the annotation values a tenant
 controls, and renders 200 tenants to catch an accidentally quadratic filter.
+
+`tests/migrate` drives [hack/mto-argocd-migrate](hack/mto-argocd-migrate)
+against a fake `kubectl` that records every call, so what it pins is what the
+script must never do on a production cluster: write anything without `--apply`,
+delete an `Extensions` CR before the retain patch is confirmed, opt a tenant in
+before its CR is drained, or issue a `delete appproject` at all. The parent
+`Template` it reads is rendered from the real chart, so the script and the chart
+cannot drift apart on annotation keys.
 
 ```bash
 make helm-render-test-regenerate            # accept an intended output change

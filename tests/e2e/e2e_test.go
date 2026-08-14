@@ -35,6 +35,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,7 +44,6 @@ import (
 )
 
 const (
-	chartDir     = "../../charts/mto-extension-argocd"
 	releaseName  = "mto-argocd-e2e"
 	optInKey     = "argocd.tenantoperator.stakater.com/enabled"
 	whitelistKey = "argocd.tenantoperator.stakater.com/cluster-resource-whitelist"
@@ -272,7 +272,7 @@ func TestRevertModeWedgesOnDelete(t *testing.T) {
 	// Same release name as TestLifecycle -- tests in a package run
 	// sequentially, and reusing it avoids the ownership-metadata clash that a
 	// second release name hits against any object still being finalized.
-	helmRun(t, append([]string{"install", releaseName, chartDir},
+	helmRun(t, append([]string{"install", releaseName, chartDir(t)},
 		helmArgs("--set", "sync.mode=revert")...))
 	t.Cleanup(func() {
 		unannotate(t, optInKey)
@@ -377,11 +377,11 @@ func helmArgs(extra ...string) []string {
 
 func helmInstall(t *testing.T) {
 	t.Helper()
-	helmRun(t, append([]string{"install", releaseName, chartDir}, helmArgs()...))
+	helmRun(t, append([]string{"install", releaseName, chartDir(t)}, helmArgs()...))
 }
 func helmUpgrade(t *testing.T) {
 	t.Helper()
-	helmRun(t, append([]string{"upgrade", releaseName, chartDir}, helmArgs()...))
+	helmRun(t, append([]string{"upgrade", releaseName, chartDir(t)}, helmArgs()...))
 }
 
 // helmUninstall removes the release AND waits for the objects to actually go.
@@ -399,15 +399,26 @@ func helmUpgrade(t *testing.T) {
 // force anything.
 func helmUninstall(t *testing.T) {
 	t.Helper()
-	_ = exec.Command("helm", "uninstall", releaseName, "--kube-context", kubeContext, "-n", operatorNS).Run()
+	_ = exec.Command(helm.Bin(), "uninstall", releaseName, "--kube-context", kubeContext, "-n", operatorNS).Run()
 	waitFor(t, "the parent Template to be released", func() bool {
 		return get(t, gvkTemplate, operatorNS, "mto-argocd-parent") == nil
 	})
 }
 
+// chartDir is the chart under test. Resolved through tests/internal/helm so
+// every suite agrees on where the chart is.
+func chartDir(t *testing.T) string {
+	t.Helper()
+	dir, err := helm.ChartDir()
+	if err != nil {
+		t.Fatalf("resolving chart dir: %v", err)
+	}
+	return dir
+}
+
 func helmRun(t *testing.T, args []string) {
 	t.Helper()
-	out, err := exec.Command("helm", args...).CombinedOutput()
+	out, err := exec.Command(helm.Bin(), args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm %s: %v\n%s", strings.Join(args[:1], " "), err, out)
 	}

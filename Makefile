@@ -34,18 +34,31 @@ helm-lint: helm ## Lint the chart. argocd.namespace is required, so lint has to 
 
 .PHONY: helm-render-test
 helm-render-test: helm ## Render tests: execute both gotemplates against fixtures and diff the AppProjects.
-	HELM=$(HELM) go test -count=1 ./tests/...
+	HELM=$(HELM) go test -count=1 ./tests/render/...
+
+.PHONY: migrate-test
+migrate-test: helm ## Test hack/mto-argocd-migrate against a fake cluster. No cluster needed.
+	HELM=$(HELM) go test -count=1 ./tests/migrate/...
 
 .PHONY: helm-render-test-regenerate
 helm-render-test-regenerate: helm ## Rewrite the golden files. Review the diff before committing.
-	HELM=$(HELM) REGENERATE=1 go test -count=1 ./tests/...
+	HELM=$(HELM) REGENERATE=1 go test -count=1 ./tests/render/...
 
 .PHONY: vet
-vet: ## Vet the test harness.
+vet: ## Vet and format-check the test harness.
 	go vet ./...
+	@# go vet does not check formatting, so an unformatted file used to reach
+	@# main and show up as reformat noise in the next diff that touched it.
+	@unformatted="$$(gofmt -l .)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed:" >&2; echo "$$unformatted" >&2; \
+		echo "run: gofmt -w ." >&2; exit 1; \
+	fi
 
 .PHONY: test
-test: helm-lint vet helm-render-test admission-test ## Everything CI runs.
+# CI calls this target directly rather than re-listing its prerequisites, so
+# adding one here is enough to make it run on every pull request.
+test: helm-lint vet helm-render-test migrate-test admission-test ## Everything CI runs.
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # 1.31 cannot compile template-operator-v2's CEL rule on objectFieldRef
@@ -73,5 +86,9 @@ admission-test: helm envtest ## Check the API server accepts what the chart rend
 	REQUIRE_ADMISSION_TESTS=1 HELM=$(HELM) KUBEBUILDER_ASSETS="$$assets" go test -count=1 ./tests/admission/...
 
 .PHONY: e2e-test
-e2e-test: ## Run the E2E suite against a live cluster. Requires KUBE_CONTEXT, E2E_TENANT, E2E_ARGO_NAMESPACE.
-	E2E=1 go test ./tests/e2e/... -v -timeout 20m -count=1
+e2e-test: helm ## Run the E2E suite against a live cluster. Requires KUBE_CONTEXT, E2E_TENANT, E2E_ARGO_NAMESPACE.
+	@# HELM is set here for the same reason every other suite sets it. This
+	@# target used to omit it, so the e2e suite -- the only one that installs
+	@# into a live cluster -- rendered the chart with whatever helm was on PATH
+	@# while CI and every other suite used the pinned version.
+	E2E=1 HELM=$(HELM) go test ./tests/e2e/... -v -timeout 20m -count=1

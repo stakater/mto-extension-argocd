@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
 )
 
 const (
@@ -17,21 +19,14 @@ const (
 	childTemplateName  = "mto-argocd-child"
 )
 
-// ChartDir is the chart under test, relative to this package.
+// ChartDir is the chart under test, resolved to an absolute path.
 func ChartDir(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs("../../charts/mto-extension-argocd")
+	abs, err := helm.ChartDir()
 	if err != nil {
 		t.Fatalf("resolving chart dir: %v", err)
 	}
 	return abs
-}
-
-func helmBin() string {
-	if h := os.Getenv("HELM"); h != "" {
-		return h
-	}
-	return "helm"
 }
 
 // HelmTemplate renders the chart. It returns the error rather than failing the
@@ -50,7 +45,7 @@ func HelmTemplate(t *testing.T, valuesYAML string, sets map[string]string) (stri
 	for k, v := range sets {
 		args = append(args, "--set", fmt.Sprintf("%s=%s", k, v))
 	}
-	out, err := exec.Command(helmBin(), args...).CombinedOutput()
+	out, err := exec.Command(helm.Bin(), args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("helm template: %w: %s", err, out)
 	}
