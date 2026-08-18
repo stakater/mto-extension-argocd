@@ -1,0 +1,32 @@
+# The IntegrationConfig the chart's parent template reads.
+#
+# On a real cluster multi-tenant-operator owns this object. The E2E cluster
+# runs MTO's CRDs without MTO itself (see hack/e2e/README.md), so the suite
+# supplies it -- narrowed to the one field the chart actually consumes,
+# .spec.accessControl.privileged.
+#
+# `namespaces` is NOT decoration here. The parent refuses to render at all when
+# accessControl.privileged.namespaces is absent, and the patterns below are
+# MTO's own defaults, so the E2E cluster exercises the same regexes a customer
+# has. They are also what the privileged-filtering test asserts against: a
+# namespace called openshift-* that is labelled for a tenant must NOT reach
+# that tenant's AppProject destinations.
+apiVersion: tenantoperator.stakater.com/v1beta1
+kind: IntegrationConfig
+metadata:
+  name: tenant-operator-config
+  namespace: multi-tenant-operator
+spec:
+  accessControl:
+    privileged:
+      namespaces:
+        - ^default$
+        - ^openshift-*
+        - ^kube-*
+      serviceAccounts:
+        - ^system:serviceaccount:openshift-*
+        - ^system:serviceaccount:kube-*
+      # Added to every tenant role in every rendered AppProject, so the E2E
+      # suite asserts on this exact string.
+      groups:
+        - cluster-admins

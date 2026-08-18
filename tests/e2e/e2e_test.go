@@ -1,5 +1,5 @@
 // Package e2e drives the chart against a live cluster running
-// template-operator-v2, multi-tenant-operator and ArgoCD.
+// template-operator-v2 and ArgoCD.
 //
 // It is the only layer where template-operator-v2 actually reconciles. The
 // render tests prove the gotemplates produce the right AppProject and the
@@ -8,22 +8,39 @@
 // here was first reproduced by hand against an OpenShift 4.20 cluster with
 // MTO v1.8.2, tov2 v0.0.5 and ArgoCD 3.4.6.
 //
+// # Two modes, and the difference is who owns the tenants
+//
+// SELF-PROVISIONED -- `make e2e-kind`, which builds the whole stack from
+// nothing and sets E2E_MANAGE_TENANTS=1. The suite creates its own Tenants and
+// Namespaces (see cluster.go) and deletes them afterwards. This is the mode CI
+// runs, and the only one that can reach a namespace matching a privileged
+// pattern or a tenant with no namespaces at all.
+//
+//	make e2e-kind
+//
+// BORROWED -- against a licensed cluster that already runs MTO:
+//
 //	E2E=1 \
 //	KUBE_CONTEXT=<context> \
 //	E2E_TENANT=<an existing tenant to borrow> \
 //	E2E_ARGO_NAMESPACE=<where ArgoCD runs> \
 //	go test ./tests/e2e/... -v -timeout 20m
 //
-// It BORROWS an existing tenant rather than creating one, because MTO's free
-// tier caps a cluster at two Tenants and its namespace webhook refuses any
-// namespace without a stakater.com/tenant label -- so on a licensed cluster
-// there is frequently no room to make your own. Pick a tenant with no
-// Extensions CR: this chart and ExtensionsArgoCDReconciler would otherwise
-// both claim AppProject/<tenant> and fight over it.
+// It borrows rather than creates there because MTO's free tier caps a cluster
+// at two Tenants and its namespace webhook refuses any namespace without a
+// stakater.com/tenant label -- so on a licensed cluster there is frequently no
+// room to make your own. Pick a tenant with no Extensions CR: this chart and
+// ExtensionsArgoCDReconciler would otherwise both claim AppProject/<tenant>
+// and fight over it. Tests that need namespaces or tenants they do not own
+// skip in this mode, and say so.
 //
-// The suite installs the chart with scaffolding.mode=OnAnnotation and only
-// ever annotates E2E_TENANT, so no other tenant is scaffolded. It removes
-// every annotation it sets and uninstalls the release on the way out.
+// In borrowed mode the suite installs the chart with
+// scaffolding.mode=OnAnnotation and only ever annotates the borrowed tenant,
+// so nothing else on the cluster is scaffolded. The managed-mode tests go
+// further -- they exercise the other scaffolding modes and annotate the other
+// fixture tenants -- which is safe there because every tenant on that cluster
+// is a fixture. Either way the suite removes every annotation it sets and
+// uninstalls the release on the way out.
 package e2e
 
 import (
@@ -36,6 +53,7 @@ import (
 	"time"
 
 	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -47,6 +65,12 @@ const (
 	releaseName  = "mto-argocd-e2e"
 	optInKey     = "argocd.tenantoperator.stakater.com/enabled"
 	whitelistKey = "argocd.tenantoperator.stakater.com/cluster-resource-whitelist"
+	purgeKey     = "argocd.tenantoperator.stakater.com/on-delete-purge"
+
+	// The chart's tenantNamespaceLabel default. The suite labels the namespaces
+	// it creates with it, and never overrides the value in the chart, so a
+	// change to one without the other fails loudly here.
+	tenantNamespaceLabel = "stakater.com/tenant"
 
 	settle = 25 * time.Second
 )
@@ -64,6 +88,9 @@ var (
 	gvkTemplateIn = schema.GroupVersionKind{Group: "templates.v2.stakater.com", Version: "v2alpha1", Kind: "TemplateInstance"}
 	gvkTemplate   = schema.GroupVersionKind{Group: "templates.v2.stakater.com", Version: "v2alpha1", Kind: "Template"}
 	gvkTenant     = schema.GroupVersionKind{Group: "tenantoperator.stakater.com", Version: "v1beta3", Kind: "Tenant"}
+	// v1beta1, not v1beta3: the IntegrationConfig's storage version differs
+	// from the Tenant's, and the chart's objectFieldRef names v1beta1 too.
+	gvkIntegrationConfig = schema.GroupVersionKind{Group: "tenantoperator.stakater.com", Version: "v1beta1", Kind: "IntegrationConfig"}
 )
 
 func TestMain(m *testing.M) {
@@ -72,11 +99,23 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	kubeContext = os.Getenv("KUBE_CONTEXT")
+	// In self-provisioned mode the fixture names are fixed: provisioning, the
+	// namespace labels and the expected destinations are all built around
+	// fixtureTenant, so an E2E_TENANT override would make every test act on a
+	// tenant that is never provisioned. Refuse the combination up front rather
+	// than discovering it one "not found" at a time.
 	tenant = envOr("E2E_TENANT", "")
+	if managingTenants() {
+		if tenant != "" && tenant != fixtureTenant {
+			println("E2E_TENANT cannot be overridden under E2E_MANAGE_TENANTS=1; the fixtures are named for " + fixtureTenant)
+			os.Exit(1)
+		}
+		tenant = fixtureTenant
+	}
 	argoNS = envOr("E2E_ARGO_NAMESPACE", "")
 	operatorNS = envOr("E2E_OPERATOR_NAMESPACE", argoNS)
 	if tenant == "" || argoNS == "" {
-		println("e2e requires E2E_TENANT and E2E_ARGO_NAMESPACE")
+		println("e2e requires E2E_TENANT and E2E_ARGO_NAMESPACE (E2E_TENANT is fixed under E2E_MANAGE_TENANTS=1)")
 		os.Exit(1)
 	}
 
@@ -86,7 +125,6 @@ func TestMain(m *testing.M) {
 		println("e2e requires KUBE_CONTEXT — refusing to use the ambient current-context")
 		os.Exit(1)
 	}
-	os.Setenv("KUBECONTEXT", kubeContext)
 
 	cfg, err := config.GetConfigWithContext(kubeContext)
 	if err != nil {
@@ -98,7 +136,21 @@ func TestMain(m *testing.M) {
 		println("client:", err.Error())
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+
+	if !managingTenants() {
+		os.Exit(m.Run())
+	}
+	// Fixtures are built once for the whole package rather than per test: they
+	// are what a borrowed tenant would have been, and every test treats them as
+	// pre-existing. Torn down explicitly because os.Exit skips defers.
+	if err := provisionFixtures(); err != nil {
+		println("provisioning fixtures:", err.Error())
+		teardownFixtures()
+		os.Exit(1)
+	}
+	code := m.Run()
+	teardownFixtures()
+	os.Exit(code)
 }
 
 // childTIName mirrors the parent gotemplate's naming. The `tenant-` segment
@@ -113,14 +165,29 @@ func envOr(k, def string) string {
 	return def
 }
 
+// expectRetain reports whether this run ASSERTS the retain contract instead of
+// merely reporting which behaviour it observed. Which one you get is a property
+// of the template-operator-v2 build (TOV2-1): released builds up to 0.0.6
+// delete on descaffold, 8a44194+ releases. A lane that installs a fixed
+// operator sets E2E_EXPECT_RETAIN=1 so a chart regression in release semantics
+// cannot hide behind "not implemented in this build".
+func expectRetain() bool { return os.Getenv("E2E_EXPECT_RETAIN") != "" }
+
 // TestLifecycle runs the scenarios in dependency order against one install.
 // Deliberately one test with ordered subtests rather than independent ones:
 // each step's precondition is the previous step's outcome, and a helm
 // install/uninstall per scenario would take longer than the whole suite.
 func TestLifecycle(t *testing.T) {
+	// Managed mode owns its AppProjects, so leftovers a previous test retained
+	// can be cleared -- without this, "AppProject to appear" below is satisfied
+	// by one that was already there. Borrowed mode must not delete an AppProject
+	// it does not own, so there the pre-existing exposure stands.
+	if managingTenants() {
+		startClean(t)
+	}
 	helmInstall(t)
 	t.Cleanup(func() {
-		unannotate(t, optInKey, whitelistKey)
+		unannotate(t, optInKey, whitelistKey, purgeKey)
 		helmUninstall(t)
 	})
 
@@ -139,7 +206,7 @@ func TestLifecycle(t *testing.T) {
 		waitFor(t, "AppProject to appear", func() bool { return get(t, gvkAppProject, argoNS, tenant) != nil })
 		waitReady(t, gvkTemplateIn, operatorNS, childTIName(tenant))
 
-		ap := get(t, gvkAppProject, argoNS, tenant)
+		ap := mustGet(t, gvkAppProject, argoNS, tenant)
 		spec, _ := ap.Object["spec"].(map[string]any)
 
 		if got := spec["description"]; got != "Managed by mto-extension-argocd" {
@@ -170,9 +237,12 @@ func TestLifecycle(t *testing.T) {
 		if len(users) == 0 {
 			t.Skipf("tenant %s has no owner users to assert on", tenant)
 		}
-		ap := get(t, gvkAppProject, argoNS, tenant)
+		ap := mustGet(t, gvkAppProject, argoNS, tenant)
 		spec, _ := ap.Object["spec"].(map[string]any)
 		roles, _ := spec["roles"].([]any)
+		if len(roles) == 0 {
+			t.Fatal("AppProject has no roles to assert on")
+		}
 		owner, _ := roles[0].(map[string]any)
 		groups := strList(owner["groups"])
 		for _, u := range users {
@@ -183,7 +253,7 @@ func TestLifecycle(t *testing.T) {
 	})
 
 	t.Run("a malformed annotation fails one child and never strips the live object", func(t *testing.T) {
-		before := get(t, gvkAppProject, argoNS, tenant)
+		before := mustGet(t, gvkAppProject, argoNS, tenant)
 		rvBefore := before.GetResourceVersion()
 
 		annotate(t, whitelistKey, "{not json")
@@ -208,7 +278,7 @@ func TestLifecycle(t *testing.T) {
 		annotate(t, whitelistKey, `[{"group":"","kind":"Namespace"}]`)
 		waitReady(t, gvkTemplateIn, operatorNS, childTIName(tenant))
 
-		spec, _ := get(t, gvkAppProject, argoNS, tenant).Object["spec"].(map[string]any)
+		spec, _ := mustGet(t, gvkAppProject, argoNS, tenant).Object["spec"].(map[string]any)
 		wl, _ := spec["clusterResourceWhitelist"].([]any)
 		if len(wl) != 1 {
 			t.Fatalf("clusterResourceWhitelist = %v, want one entry from the annotation", wl)
@@ -219,10 +289,10 @@ func TestLifecycle(t *testing.T) {
 	})
 
 	t.Run("re-applying the chart does not churn the AppProject", func(t *testing.T) {
-		rv := get(t, gvkAppProject, argoNS, tenant).GetResourceVersion()
+		rv := mustGet(t, gvkAppProject, argoNS, tenant).GetResourceVersion()
 		helmUpgrade(t)
 		time.Sleep(settle)
-		if got := get(t, gvkAppProject, argoNS, tenant).GetResourceVersion(); got != rv {
+		if got := mustGet(t, gvkAppProject, argoNS, tenant).GetResourceVersion(); got != rv {
 			t.Errorf("AppProject rewritten by an identical upgrade (rv %s -> %s)", rv, got)
 		}
 	})
@@ -230,7 +300,7 @@ func TestLifecycle(t *testing.T) {
 	// The reason the chart ships sync.mode=strict. Under revert the same delete
 	// wedges the object permanently -- see TestRevertModeWedgesOnDelete.
 	t.Run("strict sync refuses an out-of-band delete", func(t *testing.T) {
-		ap := get(t, gvkAppProject, argoNS, tenant)
+		ap := mustGet(t, gvkAppProject, argoNS, tenant)
 		err := k8s.Delete(context.Background(), ap)
 		if err == nil {
 			t.Fatal("delete was allowed under sync.mode=strict; the admission webhook is not enforcing")
@@ -243,13 +313,136 @@ func TestLifecycle(t *testing.T) {
 		}
 	})
 
-	// Not a bug -- the documented consequence of TOV2-1 being unimplemented,
-	// pinned so nobody is surprised by it in production. Runs last because it
-	// destroys the AppProject.
-	t.Run("removing the opt-in reaps the AppProject", func(t *testing.T) {
+	// UPDATE, not just DELETE. The webhook's rules cover both, and an operator
+	// who hand-edits a project is far more likely than one who deletes it --
+	// this is the case drift protection exists for.
+	t.Run("strict sync refuses an out-of-band edit", func(t *testing.T) {
+		ap := mustGet(t, gvkAppProject, argoNS, tenant)
+		rv := ap.GetResourceVersion()
+		err := k8s.Patch(context.Background(), ap,
+			client.RawPatch(types.MergePatchType, []byte(`{"spec":{"description":"edited by hand"}}`)))
+		if err == nil {
+			t.Fatal("an out-of-band edit was allowed under sync.mode=strict")
+		}
+		if !strings.Contains(err.Error(), "sync-enforcement") {
+			t.Errorf("edit was rejected, but not by the sync webhook: %v", err)
+		}
+		if got := mustGet(t, gvkAppProject, argoNS, tenant); got.GetResourceVersion() != rv {
+			t.Error("the refused edit still changed the object")
+		}
+	})
+
+	// The exemption that keeps a supported ArgoCD workflow working. `argocd
+	// proj role create-token` appends to spec.roles[].jwtTokens -- in the SPEC,
+	// not the status -- so without spec.roles[*].jwtTokens in ignoreFields,
+	// strict mode would deny every token a tenant mints for its CI. The chart
+	// refuses to render strict without it; this proves the exemption actually
+	// works against the live webhook.
+	t.Run("strict sync still allows ArgoCD to mint a project role token", func(t *testing.T) {
+		ap := mustGet(t, gvkAppProject, argoNS, tenant)
+		// A JSON patch, precisely because a merge patch on spec.roles replaces
+		// the whole list -- which would touch the roles' names, policies and
+		// groups, none of which are exempt, and the webhook would rightly deny
+		// it. This adds exactly the one exempt field, which is what `argocd
+		// proj role create-token` does.
+		patch := []byte(`[{"op":"add","path":"/spec/roles/0/jwtTokens","value":[{"iat":1700000000}]}]`)
+		if err := k8s.Patch(context.Background(), ap, client.RawPatch(types.JSONPatchType, patch)); err != nil {
+			t.Fatalf("minting a project role token was denied under strict: %v", err)
+		}
+		got := mustGet(t, gvkAppProject, argoNS, tenant)
+		spec, _ := got.Object["spec"].(map[string]any)
+		roles, _ := spec["roles"].([]any)
+		if len(roles) == 0 {
+			t.Fatal("AppProject has no roles after the token was accepted")
+		}
+		first, _ := roles[0].(map[string]any)
+		if _, ok := first["jwtTokens"]; !ok {
+			t.Error("the token was accepted but did not land on the object")
+		}
+	})
+
+	// The chart's retain contract, and the one assertion in this suite whose
+	// outcome depends on the template-operator-v2 build underneath it.
+	//
+	// onDeletePurgeAppProject defaults to false, which the chart expresses by
+	// stamping templates.v2.stakater.com/deletion-policy: Orphan on every
+	// AppProject it renders. Whether that is honoured is TOV2-1: older builds
+	// delete every rendered resource unconditionally, so descaffolding a tenant
+	// took its ArgoCD project with it.
+	//
+	// Both outcomes are reported rather than one being a failure, because which
+	// one you get is a property of the operator, not of this chart -- and
+	// knowing which one this cluster gives you is the point. The purge=true
+	// direction below is version-independent and IS asserted.
+	//
+	// Runs last because it un-scaffolds the tenant.
+	t.Run("removing the opt-in releases the AppProject", func(t *testing.T) {
 		unannotate(t, optInKey)
 		waitFor(t, "child to be reaped", func() bool { return countChildren(t) == 0 })
-		waitFor(t, "AppProject to be reaped", func() bool { return get(t, gvkAppProject, argoNS, tenant) == nil })
+		time.Sleep(settle)
+
+		ap := get(t, gvkAppProject, argoNS, tenant)
+		if ap == nil {
+			if expectRetain() {
+				t.Fatal("E2E_EXPECT_RETAIN is set, but descaffolding deleted the tenant's AppProject")
+			}
+			t.Log("TOV2-1 NOT IMPLEMENTED in this build: the retain annotation was ignored " +
+				"and descaffolding deleted the tenant's AppProject")
+			return
+		}
+		t.Log("retain honoured: descaffolding released the AppProject instead of deleting it")
+
+		// Released has to mean released. A retained object still carrying the
+		// operator's finalizer could never be deleted by anyone, and one still
+		// carrying its instance label would stay matched by the strict-mode
+		// webhook -- both would turn "we kept your project" into "your project
+		// is now undeletable".
+		if f := ap.GetFinalizers(); len(f) != 0 {
+			t.Errorf("released AppProject still carries finalizers %v", f)
+		}
+		if _, ok := ap.GetLabels()["templates.v2.stakater.com/instance"]; ok {
+			t.Error("released AppProject still carries the instance label")
+		}
+	})
+
+	// The other direction, and it holds on every operator build: with purge
+	// asked for explicitly, descaffolding must delete the AppProject.
+	t.Run("with purge enabled, removing the opt-in deletes the AppProject", func(t *testing.T) {
+		// Re-opting-in ADOPTS the project the previous subtest left behind --
+		// deliberately, rather than deleting it first and waiting for a fresh
+		// one. An out-of-band delete followed immediately by a re-opt-in is
+		// the shape that hits the stale-cache half of TOV2-8: the operator
+		// compares against a resource its informer still holds, logs "No drift
+		// detected, skipping apply" and never recreates anything. Adoption
+		// exercises the same code path this test cares about without racing
+		// that.
+		annotate(t, purgeKey, "true")
+		annotate(t, optInKey, "true")
+
+		// Wait for OWNERSHIP, not for the absence of the retain annotation.
+		// Releasing strips every annotation the operator manages, so "no
+		// deletion-policy annotation" is already true of the object this
+		// subtest inherits -- the wait returned instantly, the opt-in was
+		// removed again before the parent had rendered anything, and nothing
+		// was ever there to purge. The instance label only appears once the
+		// operator has actually taken the object back.
+		waitReady(t, gvkTemplateIn, operatorNS, childTIName(tenant))
+		waitFor(t, "the AppProject to be re-adopted", func() bool {
+			ap := get(t, gvkAppProject, argoNS, tenant)
+			if ap == nil {
+				return false
+			}
+			_, managed := ap.GetLabels()["templates.v2.stakater.com/instance"]
+			return managed
+		})
+		// And with purge armed the retain annotation must NOT be stamped, or
+		// the operator cannot tell the two intents apart.
+		if ap := mustGet(t, gvkAppProject, argoNS, tenant); ap.GetAnnotations()["templates.v2.stakater.com/deletion-policy"] != "" {
+			t.Error("deletion-policy annotation stamped even though purge is enabled")
+		}
+
+		unannotate(t, optInKey, purgeKey)
+		waitFor(t, "AppProject to be purged", func() bool { return get(t, gvkAppProject, argoNS, tenant) == nil })
 	})
 }
 
@@ -269,11 +462,13 @@ func TestLifecycle(t *testing.T) {
 //
 // When tov2 fixes this, this test starts failing -- which is the point.
 func TestRevertModeWedgesOnDelete(t *testing.T) {
+	if managingTenants() {
+		startClean(t)
+	}
 	// Same release name as TestLifecycle -- tests in a package run
 	// sequentially, and reusing it avoids the ownership-metadata clash that a
 	// second release name hits against any object still being finalized.
-	helmRun(t, append([]string{"install", releaseName, chartDir(t)},
-		helmArgs("--set", "sync.mode=revert")...))
+	helmInstall(t, "--set", "sync.mode=revert")
 	t.Cleanup(func() {
 		unannotate(t, optInKey)
 		helmUninstall(t)
@@ -282,7 +477,7 @@ func TestRevertModeWedgesOnDelete(t *testing.T) {
 	annotate(t, optInKey, "true")
 	waitFor(t, "AppProject to appear", func() bool { return get(t, gvkAppProject, argoNS, tenant) != nil })
 
-	ap := get(t, gvkAppProject, argoNS, tenant)
+	ap := mustGet(t, gvkAppProject, argoNS, tenant)
 	if err := k8s.Delete(context.Background(), ap); err != nil {
 		t.Fatalf("deleting AppProject under revert: %v", err)
 	}
@@ -375,31 +570,58 @@ func helmArgs(extra ...string) []string {
 	}, extra...)
 }
 
-func helmInstall(t *testing.T) {
+// helmInstall and helmUpgrade take the same extras so a test can install with
+// one set of values and upgrade to another -- which is how the reap-on-narrowing
+// behaviour is exercised. Later --set flags win in helm, so an extra overrides
+// the defaults in helmArgs rather than conflicting with them.
+func helmInstall(t *testing.T, extra ...string) {
 	t.Helper()
-	helmRun(t, append([]string{"install", releaseName, chartDir(t)}, helmArgs()...))
+	helmRun(t, append([]string{"install", releaseName, chartDir(t)}, helmArgs(extra...)...))
 }
-func helmUpgrade(t *testing.T) {
+func helmUpgrade(t *testing.T, extra ...string) {
 	t.Helper()
-	helmRun(t, append([]string{"upgrade", releaseName, chartDir(t)}, helmArgs()...))
+	helmRun(t, append([]string{"upgrade", releaseName, chartDir(t)}, helmArgs(extra...)...))
 }
 
-// helmUninstall removes the release AND waits for the objects to actually go.
+// helmUninstall tears the release down in the ORDER NOTES.txt tells operators
+// to use, and waits for each step. Both waits are load-bearing.
 //
-// `helm uninstall` returns as soon as the API server accepts the deletes, but
-// template-operator-v2 holds a finalizer on its own Template, so
-// Template/mto-argocd-parent outlives the command by a few seconds. A
-// subsequent install then fails with
+// Drain the children first. `helm uninstall` deletes the RBAC and the
+// TemplateInstances together; the RBAC goes immediately while each child waits
+// on a finalizer that needs that RBAC to delete its AppProject, so nothing
+// completes and every object has to have its finalizer cleared by hand
+// (TOV2-5). Deleting the parent first lets the children -- and their
+// AppProjects -- drain while the operator can still act. Measured: skipping
+// this left an AppProject stuck in Terminating for the rest of the run, with
+// DELETE returning success and the object never going away.
+//
+// Then wait for the parent Template. `helm uninstall` returns as soon as the
+// API server accepts the deletes, but template-operator-v2 holds a finalizer on
+// its own Template, so Template/mto-argocd-parent outlives the command by a few
+// seconds. A subsequent install then fails with
 //
 //	Template "mto-argocd-parent" ... exists and cannot be imported into the
 //	current release: invalid ownership metadata
 //
-// which is a real operational hazard, not just a test artefact: a reinstall
-// immediately after an uninstall fails, and the fix is to wait rather than to
-// force anything.
+// which is a real operational hazard, not just a test artefact (TOV2-4).
+//
+// Running the documented procedure here rather than a bare `helm uninstall`
+// means the runbook is exercised on every test that installs anything.
 func helmUninstall(t *testing.T) {
 	t.Helper()
-	_ = exec.Command(helm.Bin(), "uninstall", releaseName, "--kube-context", kubeContext, "-n", operatorNS).Run()
+	if parent := get(t, gvkTemplateIn, operatorNS, "mto-argocd-parent"); parent != nil {
+		if err := k8s.Delete(context.Background(), parent); err != nil {
+			t.Logf("deleting the parent TemplateInstance: %v", err)
+		}
+	}
+	waitFor(t, "the children to drain", func() bool { return countChildren(t) == 0 })
+
+	// The wait below converts a total failure into a timeout, but two minutes
+	// later and blaming the Template -- so the helm error that explains it is
+	// logged here instead of being thrown away.
+	if out, err := exec.Command(helm.Bin(), "uninstall", releaseName, "--kube-context", kubeContext, "-n", operatorNS).CombinedOutput(); err != nil {
+		t.Logf("helm uninstall %s: %v\n%s", releaseName, err, out)
+	}
 	waitFor(t, "the parent Template to be released", func() bool {
 		return get(t, gvkTemplate, operatorNS, "mto-argocd-parent") == nil
 	})
@@ -420,7 +642,7 @@ func helmRun(t *testing.T, args []string) {
 	t.Helper()
 	out, err := exec.Command(helm.Bin(), args...).CombinedOutput()
 	if err != nil {
-		t.Fatalf("helm %s: %v\n%s", strings.Join(args[:1], " "), err, out)
+		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
 
@@ -436,7 +658,19 @@ func canI(t *testing.T, sa string, args []string) string {
 	full := append([]string{"--context", kubeContext, "auth", "can-i"}, args...)
 	full = append(full, "--as="+sa)
 	out, err := exec.Command("kubectl", full...).CombinedOutput()
-	answer := strings.TrimSpace(string(out))
+	// The verdict is the LAST line, not the whole output. kubectl prefixes
+	// warnings to stdout -- probing a cluster-scoped resource without -n emits
+	//
+	//   Warning: resource 'tenants' is not namespace scoped in group ...
+	//
+	// so comparing the whole output made every probe on a cluster-scoped kind
+	// "unusable" and killed the test before it asserted anything.
+	answer := ""
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			answer = l
+		}
+	}
 	switch answer {
 	case "yes", "no":
 		return answer
@@ -445,13 +679,33 @@ func canI(t *testing.T, sa string, args []string) string {
 	return ""
 }
 
+// get returns nil only for a genuinely ABSENT object; any other error fails
+// the test. A nil return is this suite's universal "gone / purged / never
+// scaffolded" predicate, so swallowing a transient API error here would let
+// every one of those assertions pass vacuously -- the same class of vacuity
+// canI below documents fixing.
 func get(t *testing.T, gvk schema.GroupVersionKind, ns, name string) *unstructured.Unstructured {
 	t.Helper()
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 	err := k8s.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, obj)
-	if err != nil {
+	if apierrors.IsNotFound(err) {
 		return nil
+	}
+	if err != nil {
+		t.Fatalf("getting %s %s/%s: %v", gvk.Kind, ns, name, err)
+	}
+	return obj
+}
+
+// mustGet is get for callers that dereference the result: absence becomes a
+// test failure naming the object, not a nil-pointer panic that tears down the
+// whole binary and buries the real cause.
+func mustGet(t *testing.T, gvk schema.GroupVersionKind, ns, name string) *unstructured.Unstructured {
+	t.Helper()
+	obj := get(t, gvk, ns, name)
+	if obj == nil {
+		t.Fatalf("%s %s/%s not found", gvk.Kind, ns, name)
 	}
 	return obj
 }
@@ -505,27 +759,40 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// annotate and unannotate act on the tenant under test. The *Tenant variants
+// name one explicitly, which only the self-provisioned mode has any business
+// doing -- in borrowed mode the suite must touch nothing but E2E_TENANT.
 func annotate(t *testing.T, key, value string) {
 	t.Helper()
-	patchTenant(t, fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, key, value))
+	annotateTenant(t, tenant, key, value)
 }
 
 func unannotate(t *testing.T, keys ...string) {
+	t.Helper()
+	unannotateTenant(t, tenant, keys...)
+}
+
+func annotateTenant(t *testing.T, name, key, value string) {
+	t.Helper()
+	patchTenant(t, name, fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, key, value))
+}
+
+func unannotateTenant(t *testing.T, name string, keys ...string) {
 	t.Helper()
 	var parts []string
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%q:null", k))
 	}
-	patchTenant(t, fmt.Sprintf(`{"metadata":{"annotations":{%s}}}`, strings.Join(parts, ",")))
+	patchTenant(t, name, fmt.Sprintf(`{"metadata":{"annotations":{%s}}}`, strings.Join(parts, ",")))
 }
 
-func patchTenant(t *testing.T, patch string) {
+func patchTenant(t *testing.T, name, patch string) {
 	t.Helper()
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvkTenant)
-	obj.SetName(tenant)
+	obj.SetName(name)
 	if err := k8s.Patch(context.Background(), obj, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
-		t.Fatalf("patching tenant %s: %v", tenant, err)
+		t.Fatalf("patching tenant %s: %v", name, err)
 	}
 }
 
@@ -547,6 +814,28 @@ func tenantUsers(t *testing.T, role string) []string {
 	ac, _ := spec["accessControl"].(map[string]any)
 	group, _ := ac[role].(map[string]any)
 	return strList(group["users"])
+}
+
+// childParam reads one parameter off a child TemplateInstance. It is the only
+// way to see what the PARENT decided, as opposed to what the child produced --
+// which matters when the child deliberately transforms the value, as it does
+// when it deduplicates the ArgoCD namespace out of the destination list.
+func childParam(t *testing.T, tenantName, param string) string {
+	t.Helper()
+	child := get(t, gvkTemplateIn, operatorNS, childTIName(tenantName))
+	if child == nil {
+		return ""
+	}
+	spec, _ := child.Object["spec"].(map[string]any)
+	params, _ := spec["parameters"].([]any)
+	for _, p := range params {
+		pm, _ := p.(map[string]any)
+		if pm["name"] == param {
+			v, _ := pm["value"].(string)
+			return v
+		}
+	}
+	return ""
 }
 
 func destinations(spec map[string]any) []string {

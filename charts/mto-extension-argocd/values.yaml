@@ -73,9 +73,11 @@ scaffolding:
   # Tenant is explicitly opted in. This is the replacement for creating an
   # Extensions CR: same decision, different home.
   #
-  # Changing this value to a narrower mode reaps the children it excludes, and
-  # reaping a child deletes its AppProject (until TOV2-1 lands). Treat a change
-  # here as a delete.
+  # Changing this value to a narrower mode reaps the children it excludes. What
+  # that does to their AppProjects depends on onDeletePurgeAppProject and on the
+  # operator build -- released and kept, or deleted outright. See the note on
+  # onDeletePurgeAppProject below. Treat a change here as a delete until you
+  # have confirmed otherwise on your own cluster.
   mode: OnAnnotation
 
   # The annotation key checked in OnAnnotation mode, and its expected value.
@@ -154,10 +156,25 @@ sync:
   #
   #  2. Enforcement depends on template-operator-v2's webhook being reachable.
   #     Its failurePolicy is Fail, so while the operator is down, updates and
-  #     deletes to resources it MANAGES are rejected. The blast radius stops
-  #     there: the webhook carries a matchConditions CEL filter on the
-  #     `templates.v2.stakater.com/instance` label, so the API server never
-  #     consults it for anything else.
+  #     deletes to resources it MANAGES are rejected.
+  #
+  #     The blast radius is supposed to stop there, and does so ONLY IF that
+  #     webhook carries its matchConditions CEL filter on the
+  #     `templates.v2.stakater.com/instance` label. CHECK THAT IT DOES:
+  #
+  #       kubectl get validatingwebhookconfiguration \
+  #         -o jsonpath='{.items[*].webhooks[?(@.name=="sync-enforcement.templates.v2.stakater.com")].matchConditions}'
+  #
+  #     Empty output means the webhook matches UPDATE and DELETE on every
+  #     resource in the cluster and fails closed -- which takes the whole
+  #     control plane down with it the moment the operator is unreachable,
+  #     kube-controller-manager's leader-election Lease included, and does not
+  #     self-heal. It is not hypothetical: helmify drops matchConditions when
+  #     generating tov2's chart, and only a release-time postprocess step puts
+  #     it back. The published chart (checked at 0.0.6) HAS it; a chart built
+  #     from a tov2 checkout does not. Measured on a fresh cluster; see TOV2-9
+  #     in docs/upstream-issues.md, and hack/e2e/scope-tov2-webhook.sh for the
+  #     one-command repair.
   #
   # ArgoCD writing AppProject status is NOT blocked: `status` is in
   # template-operator-v2's ServerManagedFields and always stripped before
@@ -187,9 +204,21 @@ sync:
 # AppProject. False means retain. Overridable per Tenant with the
 # on-delete-purge annotation.
 #
-# NOTE: retain is not yet enforceable -- template-operator-v2 deletes every
-# rendered resource unconditionally on child deletion (TOV2-1). Until that
-# lands this value documents intent only.
+# NOTE: whether retain is enforced depends on the template-operator-v2 build
+# underneath. The chart's part is the same either way -- it stamps
+# templates.v2.stakater.com/deletion-policy: Orphan on every AppProject it
+# renders with purge disabled.
+#
+#   8a44194 and later  honoured. Descaffolding RELEASES the AppProject:
+#                      the object stays, and comes back with no finalizer and
+#                      no ownership labels, so a human can delete it.
+#   v0.0.6 and earlier  ignored. Every rendered resource is deleted
+#                      unconditionally on child deletion (TOV2-1), so here the
+#                      value documents intent only. Both measured: v0.0.6 is
+#                      the current PUBLISHED release, and v0.0.5 is what the
+#                      live cluster runs.
+#
+# `make e2e-kind` reports which of the two your operator does.
 onDeletePurgeAppProject: false
 
 rbac:

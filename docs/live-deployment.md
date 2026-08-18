@@ -51,17 +51,17 @@ independent values; nothing requires them to match.
 
 ## Which tenants are opted in
 
-Only **`sos`**, via `argocd.tenantoperator.stakater.com/enabled=true`.
+Only **`sos`**. `pe` was migrated on 2026-08-07 to verify the runbook and then
+rolled back the same day, so the cluster is in its original state — see
+[Migration, verified end to end](#migration-verified-end-to-end).
 
-**`pe` must NOT be opted in.** It has a live `Extensions/pe-extensions` CR and
-`tenant-operator-extensions-argocd-controller` is running and owns
-`AppProject/pe`. Opting `pe` in would make this chart and that controller both
-claim the same object and fight over it. `scaffolding.mode` is `OnAnnotation`
-precisely so that cannot happen by accident — never set it to `Always` on this
-cluster.
+**`pe` must NOT be opted in while `Extensions/pe-extensions` exists.** Two
+writers would claim `AppProject/pe`; the chart wins and the controller
+error-loops where nobody is looking. `scaffolding.mode` is `OnAnnotation`
+precisely so that cannot happen by accident — never set it to `Always` here.
 
-`sos` is safe because it has no `Extensions` CR and therefore no
-controller-owned AppProject.
+The migration deletes the CR *first*, which is what makes opting `pe` in safe
+during a real cutover.
 
 ## Inspecting it
 
@@ -91,12 +91,108 @@ operator is not reconciling".
 |---|---|
 | `AppProject/sos` | this chart |
 | `Application/sos-allowed-dest` | a live demonstration, see below — manual sync, deploys nothing |
-| `AppProject/pe` | the Go controller — leave alone |
+| `AppProject/pe` | the Go controller — migrated to the chart on 2026-08-07 and **rolled back the same day** |
 | `AppProject/default` | ArgoCD's own — leave alone |
-| `Extensions/pe-extensions` | pre-existing — leave alone |
+| `Extensions/pe-extensions` | restored by the rollback; healthy, `AppProjectSynced` |
 
 Tenant `sos` also carries a `source-repos` annotation, added to make the
-project usable — see the finding below.
+project usable — see the finding below. `pe` does not, so its project still
+permits no repositories — faithfully, which is the point.
+
+## Migration, verified end to end
+
+Run on 2026-08-07 with [hack/mto-argocd-migrate](../hack/mto-argocd-migrate),
+following [MIGRATION.md](../MIGRATION.md). Tenant `pe` was the subject: a live
+`Extensions/pe-extensions` CR and a controller-owned `AppProject/pe`, which is
+exactly the before-state a customer has.
+
+| Step | Result |
+|---|---|
+| `inventory` | Read the chart's config off `Template/mto-argocd-parent`, matched `argocd.namespace` against the IntegrationConfig, and found no unseeded resource lists |
+| `strip-owner-refs` | Removed a `v1beta2` `Tenant` ownerRef and left the AppProject intact |
+| `snapshot` | 3 AppProjects captured; `diff` against it immediately after was clean |
+| `cutover pe --apply` | Deleted the CR, **confirmed `AppProject/pe` survived**, opted the tenant in, waited for `mto-argocd-tenant-pe` to go `Ready` |
+| `diff` | `1 changed, 0 new, 0 missing` — only the description and the added user |
+
+**The load-bearing claim now has evidence.** Deleting an `Extensions` CR does
+not take its AppProject with it, and the finalizer
+`tenantoperator.stakater.com/appproject` was released cleanly by the still-running
+controller.
+
+**Adoption is in place, not a recreate.** `AppProject/pe` kept UID
+`e5401603-2209-4c05-872e-b63ff3166139` across the whole procedure. It gained
+template-operator-v2's ownership labels and finalizer, and **kept** the
+controller's own `multi-tenant-operator/predicate` label — server-side apply
+does not remove a field owned by another manager, so stale metadata from the old
+owner survives adoption. Harmless here; worth knowing before assuming an adopted
+object is clean.
+
+The whole diff, and nothing else:
+
+```diff
+-    "description": "Managed by Extensions controller",
++    "description": "Managed by mto-extension-argocd",
+       "groups": [
+-          "pe-owner-group-489fab"
++          "pe-owner-group-489fab",
++          "ayesha.arshad@stakater.com"
+```
+
+`destinations` (11), `clusterResourceWhitelist` (2) and
+`namespaceResourceBlacklist` (1) were all unchanged, which is what proves the
+step-3 seeding worked — the chart no longer reads them from the
+IntegrationConfig, so an unseeded install would have stripped both lists here.
+
+### Two things this run did NOT cover
+
+- **The `onDeletePurgeAppProject: true` → `false` patch.** `pe-extensions` had no
+  `spec.argoCD` block at all, so it took the nil-config retain branch rather than
+  the purge branch. Arming purge on a live AppProject to test the other branch was
+  judged too dangerous to do here. Still covered only by `tests/migrate`.
+- **A tenant with per-tenant overrides.** `pe-extensions` set none, so
+  `annotations` had nothing to carry across. Also covered only by `tests/migrate`.
+
+### Rollback, also verified — and `pe` is back on the controller
+
+`pe` was migrated and then rolled back on the same day, so the cluster is once
+again in its pre-migration state. The rollback path from MIGRATION.md, run
+exactly as written:
+
+```bash
+kubectl apply -f pe-extensions.restore.yaml   # controller error-loops; expected
+kubectl annotate tenant pe argocd.tenantoperator.stakater.com/enabled-
+```
+
+Step 1 reproduced the denial verbatim, which is what leaves the controller in the
+retry loop that makes step 2 self-heal:
+
+```text
+ERROR Reconciler error  Extensions: pe-extensions
+  failed to create or update AppProject: admission webhook
+  "sync-enforcement.templates.v2.stakater.com" denied the request: resource is
+  managed by sync-enabled TemplateInstance stakater-tenant-operator/mto-argocd-tenant-pe
+```
+
+Timeline after removing the annotation, sampled every 4s:
+
+```text
+t+4s   chart-managed, uid=e5401603...
+t+8s   ABSENT
+t+12s  ABSENT
+t+16s  controller-managed, uid=8bff29cd...
+```
+
+| | |
+|---|---|
+| Gap with no AppProject | **~8 seconds** |
+| Content afterwards | `0 changed, 0 new, 0 missing` against the pre-migration snapshot |
+| tov2 residue | none — no finalizer, label, annotation or ownerRef |
+| `metadata.uid` | **changed** |
+
+**The UID change is the finding.** A rollback is a delete-and-recreate, not a
+restore, so `spec.roles[].jwtTokens` — the ArgoCD project role tokens minted by
+`argocd proj role create-token` — are destroyed with the object. Forward
+migration keeps the UID; rollback does not. Recorded in MIGRATION.md.
 
 ## When an AppProject gets deleted
 
@@ -122,7 +218,7 @@ was checked on this cluster unless marked otherwise.
 | A tenant loses all its namespaces | keeps its AppProject, with the ArgoCD namespace as its only destination (S21) |
 | The parent cannot render at all | **children and their AppProjects survive.** Pointing `integrationConfig.name` at a non-existent object put the parent in `ParametersValid=ParameterResolutionFailed`, and the child kept the same UID throughout. tov2 holds the last rendered set rather than treating "cannot render" as "render nothing" — so a broken IntegrationConfig does not wipe the fleet |
 | A chart upgrade, values change or template edit | updated in place via server-side apply — same UID, only `resourceVersion` moves |
-| `onDeletePurgeAppProject: false` | **does not protect anything yet** (TOV2-1) |
+| `onDeletePurgeAppProject: false` | **does not protect anything on this cluster** — tov2 v0.0.5 ignores the retain annotation. Honoured from `8a44194` (TOV2-1), verified on the kind E2E cluster |
 
 The last row of the first table is the one to plan around: renaming a child is a
 breaking change. It must be done reap-first, and it earns a release note.
@@ -407,7 +503,8 @@ kubectl --context="$CTX" annotate tenant <name> \
 ```
 
 The value must be exactly `"true"`. **Removing the annotation deletes that
-tenant's AppProject** — retain is not enforceable yet (TOV2-1).
+tenant's AppProject** on this cluster — tov2 v0.0.5 does not enforce retain
+(TOV2-1).
 
 ## Removing it, when that time comes
 
@@ -438,6 +535,11 @@ before reinstalling, or the install fails with an ownership-metadata error
 
 ## Re-running E2E against this install
 
+**Most of the time you want `make e2e-kind` instead** — it builds its own
+cluster and touches nothing here ([docs/e2e.md](e2e.md)). Run against *this*
+cluster only for what kind cannot show you: that the chart coexists with a real
+multi-tenant-operator, on OpenShift, with real tenants.
+
 The E2E suite installs its own release, so uninstall this one first or point it
 at a different `E2E_OPERATOR_NAMESPACE`:
 
@@ -458,5 +560,8 @@ make e2e-test
   `stakater.com/tenant` label**, so you cannot create a scratch namespace
   either.
 
-Together these are why the E2E suite borrows an existing tenant instead of
-building its own footprint.
+Together these are why the E2E suite borrows an existing tenant here instead of
+building its own footprint — and why the kind cluster exists: with MTO's CRDs
+but not MTO, the suite creates its own tenants and can reach the two paths this
+cluster forbids, a privileged namespace labelled for a tenant and a tenant with
+no namespaces at all.

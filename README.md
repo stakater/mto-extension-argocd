@@ -274,8 +274,11 @@ still reports healthy ([TOV2-2](docs/upstream-issues.md)).
 ### What deletes an AppProject
 
 Removing a tenant's opt-in annotation, narrowing `scaffolding.mode`, deleting
-or renaming the `Tenant`, or uninstalling. `onDeletePurgeAppProject: false`
-does **not** protect it yet ([TOV2-1](docs/upstream-issues.md)).
+or renaming the `Tenant`, or uninstalling — **unless** `onDeletePurgeAppProject`
+is false, the default, *and* template-operator-v2 is new enough to honour it
+(`8a44194`+). There the project is released rather than deleted; on v0.0.6 and
+earlier it is deleted regardless ([TOV2-1](docs/upstream-issues.md)).
+`make e2e-kind` reports which behaviour a given cluster has.
 
 A failing parent does *not* delete anything — tov2 holds the last rendered set,
 so a broken `IntegrationConfig` cannot wipe the fleet. Ordinary upgrades update
@@ -320,6 +323,10 @@ helm uninstall mto-extension-argocd -n <operatorNamespace>
 an ownership-metadata error — wait for `Template/mto-argocd-parent` to
 disappear first ([TOV2-4](docs/upstream-issues.md)).
 
+This procedure is not just documented, it is executed: `tests/e2e` tears every
+release down exactly this way, so a change that broke the order would fail the
+suite rather than surprise someone mid-uninstall.
+
 ## Development
 
 ```bash
@@ -335,7 +342,7 @@ Four layers, each catching what the one above it structurally cannot:
 | `tests/render` | — | wrong AppProject content, invariants over random input, scale |
 | `tests/migrate` | — | the migration script writing when it should not, or in the wrong order |
 | `tests/admission` | envtest binaries | Template CRs the API server would reject — schema and CEL |
-| `tests/e2e` | a live cluster | what template-operator-v2 does once objects are applied |
+| `tests/e2e` | a cluster (`make e2e-kind` builds one) | what template-operator-v2 does once objects are applied |
 
 **Render tests** execute the chart's gotemplates through template-operator-v2's
 *own* function map — `sprig.TxtFuncMap()` minus `env`, `expandenv`,
@@ -363,12 +370,27 @@ make helm-render-test-regenerate            # accept an intended output change
 RENDER_SEED=1234 go test ./tests/render/... # explore other property inputs
 make envtest-assets && make admission-test  # admission layer
 
+make e2e-kind                               # cluster, dependencies, chart, suite
+```
+
+**E2E builds its own cluster.** `make e2e-kind` creates a kind cluster, installs
+cert-manager, MTO's CRDs, ArgoCD and template-operator-v2, installs the chart
+and runs the suite; CI runs the same command on a runner. No credentials —
+every component is an anonymous pull, template-operator-v2 included
+(`ghcr.io/stakater/public/`). Full instructions in [docs/e2e.md](docs/e2e.md).
+
+There is a second mode for a licensed cluster that already runs MTO, where the
+suite *borrows* an existing tenant instead of creating one — MTO's free tier
+caps a cluster at two Tenants. Pick one with **no** `Extensions` CR:
+
+```bash
 E2E=1 KUBE_CONTEXT=<ctx> E2E_TENANT=<tenant> E2E_ARGO_NAMESPACE=<ns> \
   make e2e-test
 ```
 
-E2E *borrows* an existing tenant rather than creating one, because MTO's free
-tier caps a cluster at two Tenants. Pick one with **no** `Extensions` CR.
+That mode is what proves the chart coexists with MTO; the kind cluster is what
+proves the paths MTO's own webhooks make untestable — a privileged namespace
+labelled for a tenant, and a tenant with no namespaces at all.
 
 ## Differences from the Extensions controller
 

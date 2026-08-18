@@ -1,0 +1,15 @@
+# Kind cluster for the E2E suite, handed to `kind create cluster --config` by
+# the shared setup script through KIND_CONFIG.
+#
+# One node is enough: nothing here schedules by topology, and every extra node
+# is another image pull on a CI runner.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    # Pinned, and not to kind's default. template-operator-v2's CRDs carry a
+    # CEL rule on objectFieldRef that Kubernetes 1.31 cannot compile
+    # ("undefined field 'namespace'"), so the CRDs fail to install there --
+    # the same constraint that sets ENVTEST_K8S_VERSION in the Makefile. 1.33
+    # matches OpenShift 4.20, the deployment target.
+    image: kindest/node:v1.33.4

@@ -1,14 +1,43 @@
 # Upstream issues found while building this chart
 
 Drafts ready to file against `template-operator-v2`. Every one was reproduced
-on a live OpenShift 4.20 cluster (MTO v1.8.2, tov2 v0.0.5, ArgoCD 3.4.6); the
-reproduction steps are exact.
+first-hand; the reproduction steps are exact.
+
+Two environments produced them, and each entry says which:
+
+- the live OpenShift 4.20 cluster (MTO v1.8.2, tov2 **v0.0.5**, ArgoCD 3.4.6) —
+  TOV2-1 through TOV2-8;
+- the kind E2E cluster (Kubernetes 1.33.4, ArgoCD 3.4.6), run against both the
+  published tov2 **v0.0.6** and a build of `8a44194` — TOV2-9, plus the status
+  updates on TOV2-1 and TOV2-8 that the newer build made visible.
+
+**The version gap matters when reading this.** Behaviour fixed in `8a44194` is
+still broken on the v0.0.5 the live cluster runs, and the E2E cluster is
+currently the only place the newer build has been exercised against this chart.
 
 ---
 
 ## TOV2-1 — retain on delete
 
-**Status:** known, unfiled. Blocks `C10` and the Phase 2 rollout.
+**Status: FIXED UPSTREAM, unreleased.** Verified 2026-08-18 against
+template-operator-v2 at `8a44194` ("Honour a per-resource deletion policy when
+releasing rendered resources") on the kind E2E cluster: descaffolding a tenant
+now **releases** its AppProject instead of deleting it, and the released object
+comes back with no finalizer, no ownership labels and only this chart's own
+annotation on it — so it is immediately deletable by a human. The annotation key
+this chart guessed, `templates.v2.stakater.com/deletion-policy: Orphan`, is the
+one the operator implemented.
+
+`tests/e2e` asserts both directions now: retain is reported (it depends on the
+operator build underneath), and purge — `on-delete-purge: "true"` — is asserted
+outright, because that direction holds on every build.
+
+**No released build has it yet.** Measured against the current published
+release, v0.0.6, on 2026-08-18: descaffolding still deleted the AppProject. The
+live cluster runs v0.0.5. Everything below describes that behaviour and applies
+until the fix ships.
+
+Originally: known, unfiled. Blocks `C10` and the Phase 2 rollout.
 
 `handleDeletion` deletes every rendered resource unconditionally, and
 `onDeletePurgeAppProject` has no kubebuilder default — so unset means false,
@@ -268,6 +297,101 @@ so a rollback plan should not depend on it.
 
 ---
 
+## TOV2-9 — the chart CHECKED INTO the repository ships the sync-enforcement webhook unscoped, and it deadlocks the cluster it is installed into
+
+**Status:** new, found 2026-08-18 while standing up the kind E2E cluster. Not
+yet filed.
+
+**Scope, measured both ways — this is the first thing to say when filing:**
+
+| Chart | `matchConditions` | Consequence |
+|---|---|---|
+| published `oci://ghcr.io/stakater/public/charts/template-operator-v2` **0.0.6** | **present** — pulled and inspected 2026-08-18 | fine. No customer is exposed today |
+| `charts/template-operator-v2/` checked in at **`8a44194`** | **absent** | installing it deadlocks the whole cluster, unrecoverably |
+
+So this is not a live customer incident; it is an unenforced guarantee, and the
+unlucky path is the one a developer takes.
+
+### What
+
+The webhook matches `UPDATE` and `DELETE` on `*/*/*` with `failurePolicy: Fail`.
+`config/webhook/manifests.yaml` narrows that with a `matchConditions` CEL filter
+on the `templates.v2.stakater.com/instance` label. **helmify drops
+`.webhooks[].matchConditions`**, so a postprocess step re-injects it at release
+time and a helm unittest guards that step. The release pipeline runs both; the
+chart *committed to the repository* is the pre-postprocess output, so
+`helm install ./charts/template-operator-v2` from a checkout installs the
+unscoped webhook.
+
+### Why it is not merely "too broad"
+
+It is a circular deadlock, and every step was observed on a fresh kind cluster
+(Kubernetes 1.33.4):
+
+1. Helm creates the ValidatingWebhookConfiguration before the operator's pod is
+   ready, so every `UPDATE` in the cluster fails closed:
+
+   ```text
+   E0818 09:08:47 leaderelection.go:472] Failed to update lock: Internal error occurred:
+     failed calling webhook "sync-enforcement.templates.v2.stakater.com": ...
+     dial tcp 10.96.1.228:443: connect: connection refused
+   ```
+
+   That is **kube-controller-manager**, unable to renew its leader-election
+   Lease.
+
+2. A controller-manager without leadership does not run the EndpointSlice
+   controller, so the webhook's own Service never receives an endpoint.
+
+3. The webhook is therefore unreachable for ever. `helm install --wait` failed
+   with `context deadline exceeded`; the operator's own Deployment reported
+   `Available=False MinimumReplicasUnavailable` while its pod was `1/1 Running`,
+   because no controller was left to update the ReplicaSet's status.
+
+Nothing self-heals: the component that would create the endpoint is the one
+being blocked by the missing endpoint.
+
+### Recovery, and why it works
+
+Patching the webhook is possible even from inside the deadlock -- the API server
+does not consult admission webhooks for requests on `admissionregistration.k8s.io`
+objects. Adding the `matchConditions` block from `config/webhook/manifests.yaml`
+restored the cluster in under a second: leases renewed, endpoints appeared, the
+Deployment went `Available` immediately.
+
+[`hack/e2e/scope-tov2-webhook.sh`](../hack/e2e/scope-tov2-webhook.sh) does this
+automatically before the E2E suite waits on anything, and prints a warning when
+it has to.
+
+### Why this chart cares
+
+`values.yaml` tells operators that `sync.mode: strict` has a bounded blast
+radius: "the webhook carries a matchConditions CEL filter ... so the API server
+never consults it for anything else." True of the published chart, false of the
+checked-in one, and the difference is not degraded drift protection but a dead
+cluster. `values.yaml` now carries the one-line check rather than the bare
+claim.
+
+### Suggested fix
+
+Stop depending on a postprocess step to re-add a field that is load-bearing for
+availability, and stop committing the pre-postprocess chart. Either template the
+webhook by hand with `matchConditions` inline, or make the committed chart the
+postprocessed one and fail the build when it lacks the filter — the existing
+helm unittest only helps if someone runs it. The property to guarantee is:
+**the webhook cannot be installed without its filter, from any copy of the
+chart.**
+
+### Acceptance criteria
+
+- `helm install` from any published or local build of the chart yields a webhook
+  with `matchConditions` present
+- killing the operator pod does not affect any object without the
+  `templates.v2.stakater.com/instance` label -- specifically, leases in
+  `kube-system` keep renewing
+
+---
+
 ## TOV2-8 — drift detection ignores deletionTimestamp
 
 **Status:** new, found 2026-08-06. Not yet filed. The cause behind TOV2-2, split
@@ -290,6 +414,26 @@ deleted -- it believes the object matches.
 Treat a non-nil `deletionTimestamp` on an owned resource as drift. That makes
 the delete complete and the resource be re-applied from the template, which is
 what `revert` promises.
+
+### A second symptom, same cause — measured 2026-08-18 on the kind E2E cluster
+
+A resource deleted **out of band while unowned**, whose tenant is then opted
+back in, is not recreated either. The child TemplateInstance reconciles every 30
+seconds and logs the same line each time:
+
+```text
+DEBUG  No drift detected, skipping apply  ... "kind": "AppProject", "name": "e2e-alpha"
+```
+
+for over two minutes, while the AppProject genuinely does not exist. The
+comparison is against a resource the operator's informer cache still holds, so
+"no drift" is measured against something that is gone. Reconciling on a timer
+does not help, because the cache is what is stale, not the trigger.
+
+The E2E suite works around it by re-adopting rather than deleting and waiting
+for a fresh create — see the purge subtest in `tests/e2e/e2e_test.go`. Worth
+naming when filing: the fix for the deletionTimestamp case does not cover this
+one, because here there is no object to carry a deletionTimestamp at all.
 
 ---
 

@@ -16,6 +16,8 @@
 > | bash render harness copied from openbao | Go, mirroring template-operator-v2's own function map |
 > | a blank `argocd.namespace` renders zero children | it renders one per tenant, each of which then fails |
 > | the IntegrationConfig read is fail-closed as written | it failed OPEN until fixed; absence is now an error |
+> | E1: a Helm-hook Job strips the legacy ownerRefs | a subcommand of `hack/mto-argocd-migrate`, run by hand |
+> | E2: turn the controller off, then dual-run for a week | never dual-run. Drain each tenant's CR **first**; the controller stays up until the end |
 >
 > Live behaviour is in [../live-deployment.md](../live-deployment.md); upstream
 > defects are in [../upstream-issues.md](../upstream-issues.md).
@@ -65,14 +67,48 @@
 | D4 | Golden files assert the **full** AppProject | Applies are server-side with `ForceOwnership`, so deleting a line from a template deletes that field from every live AppProject |
 | D5 | E2E in the new repo | Re-express the current 469-line extensions suite |
 
+**D5 is done, and went further than "re-express".** The suite now builds its own
+cluster — `make e2e-kind` creates kind and installs cert-manager, MTO's CRDs,
+ArgoCD and template-operator-v2 before running ([docs/e2e.md](../e2e.md)), and
+CI runs the same command on a runner. Owning the cluster is what closed **D1's
+caveat**: privileged-namespace filtering is no longer golden-file-only, because
+a namespace matching `^openshift-*` and labelled for a tenant can finally be
+created. Also new: a tenant with no namespaces (S21) against a live operator,
+namespace add/remove re-rendering destinations, `scaffolding.mode` narrowing,
+and ArgoCD itself refusing an Application outside the rendered destinations.
+
+Three upstream findings came straight out of standing it up — see
+[upstream-issues](../upstream-issues.md): **TOV2-9** (new, highest severity),
+and status updates on **TOV2-1** and **TOV2-8**.
+
 ## E — Migration
+
+**Done, but not as written here.** Delivered as
+[`MIGRATION.md`](../../MIGRATION.md) plus
+[`hack/mto-argocd-migrate`](../../hack/mto-argocd-migrate), pinned by
+`tests/migrate`. Two recorded reversals:
+
+- **E1 is a script subcommand, not a Helm-hook Job.** A `pre-upgrade` hook Job
+  re-runs on every upgrade, needs an image in a chart that deliberately has none,
+  and would patch `ownerReferences` on production `AppProject`s unattended. The
+  ordering it was meant to enforce — "before the parent adopts anything" — is
+  already enforced by `scaffolding.mode: OnAnnotation`: install adopts nothing
+  until a human opts a tenant in, which is a later, separate step. So the guard
+  belongs at the point of action, where its output is read.
+- **E2's dual-run is gone.** The plan sequenced *controller off → opt in →
+  delete the CRs*, which is unachievable: the `Extensions` finalizer is released
+  only by the controller being turned off. Inverting it — *drain each tenant's CR
+  first, then opt that tenant in, controller up throughout* — satisfies both
+  constraints and means two writers never own the same `AppProject` at all. No
+  staging soak is needed for a collision that cannot occur, and there is no
+  dependency on a tenant-operator release that makes the controller default-off.
 
 | ID | Task | Acceptance |
 |---|---|---|
-| E1 | Migration Job (Helm hook) | Strips `tenantoperator.stakater.com/v1beta2` Tenant ownerRefs from pre-existing AppProjects. Own SA + RBAC. **Must run before the parent adopts anything.** No Helm-hook precedent in the family — budget for getting SA/RBAC right from scratch |
-| E2 | Phase 2 dual-run | Controller default-off and out of the `ENABLE_ALL_CONTROLLERS` branch. Seed the scaffolding marker from the existing `Extensions` set, per-tenant settings into annotations, and the IC's resource lists into chart values — all three, or the diff is not empty by construction. ≥ 1 week on staging |
-| E3 | `README.md`, `MIGRATION.md`, `examples/` | Includes break-glass: set retain globally **before** `helm uninstall`, since uninstalling the parent reaps every child |
-| E4 | Release notes | Delete old `Extensions` CRs with `onDeletePurgeAppProject: false` **while the controller still runs**, then remove the controller, then the CRD. Reversed, every CR sticks in `Terminating` and the CRD wedges |
+| E1 | Strip `tenantoperator.stakater.com/v1beta2` Tenant ownerRefs | `mto-argocd-migrate strip-owner-refs`. Removes only the legacy ref, leaving unrelated ownership intact; reported by `inventory` whether or not you run it |
+| E2 | Per-tenant cutover | `mto-argocd-migrate cutover`: retain → delete the CR → confirm the AppProject survived → opt in → wait for the child. Seeds the resource lists into chart values and the per-tenant settings into annotations first, or the diff is not empty by construction |
+| E3 | `README.md`, `MIGRATION.md`, `examples/` | Includes break-glass: `sync.mode: revert`, then strip the tov2 finalizer and ownership label, so an AppProject survives a reap |
+| E4 | Release notes | In `MIGRATION.md`, ready to copy. Delete old `Extensions` CRs with `onDeletePurgeAppProject: false` **while the controller still runs**, then remove the controller, then the CRD. Reversed, every CR sticks in `Terminating` and the CRD wedges |
 
 ## F — Removal from tenant-operator (Phase 3, once zero `Extensions` objects remain)
 

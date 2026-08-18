@@ -8,6 +8,13 @@ Opt a tenant in with:
   kubectl annotate tenant <name> {{ .Values.scaffolding.annotations.enabled }}=true
 
 The value must be exactly "true".
+
+MIGRATING FROM THE EXTENSIONS CONTROLLER? Do not annotate anything yet. Delete
+that tenant's Extensions CR first, WHILE the old controller is still running --
+its finalizer is released by nothing else, and annotating first puts two writers
+on the same AppProject. Follow MIGRATION.md, or run:
+
+  hack/mto-argocd-migrate inventory
 {{- else if eq .Values.scaffolding.mode "OnLabel" -}}
 Opt a tenant in with:
 
@@ -45,8 +52,10 @@ Uninstall in this order instead:
   # 3. now the release can go
   helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-Note that step 1 DELETES every AppProject this release manages. Retain is not
-enforceable yet -- see docs/upstream-issues.md, TOV2-1.
+Note what step 1 does to the AppProjects this release manages. On
+template-operator-v2 8a44194 and later they are RELEASED and survive; on v0.0.6
+and earlier they are DELETED, because retain is not enforceable there. See
+docs/upstream-issues.md, TOV2-1.
 
 If you are reinstalling, wait for `Template/mto-argocd-parent` to disappear
 before doing so. `helm uninstall` returns before template-operator-v2 releases
