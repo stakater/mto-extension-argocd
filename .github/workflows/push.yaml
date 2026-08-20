@@ -1,0 +1,59 @@
+name: Push
+
+# Merging to main is the release: the chart is packaged and pushed at whatever
+# version Chart.yaml carries. helm-release refuses a version that is already
+# published (helm push itself would silently overwrite it), so a merge that
+# changes the chart without bumping Chart.yaml fails here, loudly, instead of
+# shipping nothing. There is no separate release workflow -- this repo is
+# chart-only, so there is no image to tag.
+on:
+  push:
+    branches:
+      - main
+    # Mirrors pull_request.yaml, including NOT ignoring docs/**: the
+    # equivalence test reads its reference data from
+    # docs/plans/spike-argocd-tov2/fixtures/, which cannot be regenerated.
+    paths-ignore:
+      - '*.md'
+      - 'examples/**'
+
+jobs:
+  push-chart:
+    name: Push Chart
+    if: "! contains(toJSON(github.event.commits.*.message), '[skip-ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same aggregate target as pull_request.yaml. No HELM override: the
+      # Makefile installs its own pinned helm, and the release below must be
+      # packaged by that same pinned version, not whatever is on PATH.
+      - name: Lint, vet and test
+        run: make test
+
+      - name: Package and push the chart
+        run: make helm-release
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+      # A red main here means the chart did not ship -- either the tests broke
+      # or the version was not bumped. Same channel the other extension repos
+      # notify.
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "mto-extension-argocd: chart release failed on main. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAKATER_DELIVERY_SLACK_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

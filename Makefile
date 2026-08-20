@@ -11,9 +11,22 @@ SHELL = /usr/bin/env bash -o pipefail
 
 LOCALBIN ?= $(shell pwd)/bin
 CHART_DIR ?= charts/mto-extension-argocd
+CHART_VERSION := $(shell awk '/^version:/{print $$2; exit}' $(CHART_DIR)/Chart.yaml)
 
 HELM ?= $(LOCALBIN)/helm
 HELM_VERSION ?= v3.16.3
+
+# Where helm-release publishes. Same registry as the other extension charts.
+HELM_REGISTRY ?= ghcr.io/stakater/charts
+
+# Registry credentials. GHCR_* is what push.yaml sets; GIT_* is the local
+# override so a developer can push to their own registry without exporting
+# GHCR-shaped names. Exported so recipes can read them as $$SHELL variables --
+# referencing $(GIT_TOKEN) in a recipe would print the token under `make -n`,
+# which expands recipes even for @-prefixed lines.
+GIT_USER  ?= $(GHCR_USERNAME)
+GIT_TOKEN ?= $(GHCR_TOKEN)
+export GIT_USER GIT_TOKEN
 
 .PHONY: help
 help: ## Show this help.
@@ -59,6 +72,35 @@ vet: ## Vet and format-check the test harness.
 # CI calls this target directly rather than re-listing its prerequisites, so
 # adding one here is enough to make it run on every pull request.
 test: helm-lint vet helm-render-test migrate-test admission-test ## Everything CI runs.
+
+.PHONY: helm-login
+helm-login: helm ## Log in to the OCI chart registry.
+	@if [ -z "$$GIT_USER" ] || [ -z "$$GIT_TOKEN" ]; then \
+		echo "GIT_USER/GIT_TOKEN (or GHCR_USERNAME/GHCR_TOKEN) must be set"; exit 1; \
+	fi
+	@echo "$$GIT_TOKEN" | $(HELM) registry login $(firstword $(subst /, ,$(HELM_REGISTRY))) -u "$$GIT_USER" --password-stdin
+
+.PHONY: helm-release
+# helm push has no existence check and no --force, and GHCR permits tag
+# overwrite, so a republished version silently replaces what clusters pull.
+#
+# Fails closed: only an explicit not-found means the tag is free. helm show
+# chart also exits 1 on DNS failure and an expired token, and treating those
+# as free would publish over a released version on a network blip. Must run
+# after helm-login -- unauthenticated, GHCR answers 403 for absent and
+# published tags alike.
+helm-release: helm helm-login helm-lint ## Package and push the chart. Refuses a version that is already published.
+	@rc=0; out=$$($(HELM) show chart oci://$(HELM_REGISTRY)/mto-extension-argocd --version $(CHART_VERSION) 2>&1) || rc=$$?; \
+	if [ $$rc -eq 0 ]; then \
+		echo "mto-extension-argocd $(CHART_VERSION) is already published -- bump Chart.yaml before releasing"; exit 1; \
+	fi; \
+	if ! printf '%s' "$$out" | grep -qiE 'not found|manifest unknown|name unknown'; then \
+		echo "cannot determine whether mto-extension-argocd $(CHART_VERSION) is published -- refusing to push:"; \
+		printf '%s\n' "$$out" | head -3; exit 1; \
+	fi
+	@mkdir -p dist
+	$(HELM) package $(CHART_DIR) -d dist
+	$(HELM) push dist/mto-extension-argocd-$(CHART_VERSION).tgz oci://$(HELM_REGISTRY)
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # 1.31 cannot compile template-operator-v2's CEL rule on objectFieldRef
