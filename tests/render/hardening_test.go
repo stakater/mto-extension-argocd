@@ -60,6 +60,9 @@ func TestTenantStringsCannotInjectYAML(t *testing.T) {
 
 	spec, _ := docs[0]["spec"].(map[string]any)
 	roles, _ := spec["roles"].([]any)
+	if len(roles) == 0 {
+		t.Fatal("rendered AppProject has no roles")
+	}
 	owner, _ := roles[0].(map[string]any)
 	groups, _ := owner["groups"].([]any)
 
@@ -112,14 +115,28 @@ func TestPrivilegedFilterFailsClosed(t *testing.T) {
 			"accessControl": map[string]any{"privileged": map[string]any{"groups": []any{"admins"}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer func() { _ = recover() }()
-			values, _ := marshalValues(map[string]any{
+			// A panic is NOT an acceptable way to fail closed: on cluster a
+			// template ERROR fails one parent TemplateInstance (contained),
+			// while a panic in the operator's renderer is a crash-looping
+			// operator. An earlier version of this test had a bare recover()
+			// here, which swallowed panics and passed vacuously -- the one
+			// test behind the cross-tenant-exposure invariant asserting
+			// nothing at all.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("render panicked instead of failing with an error: %v", r)
+				}
+			}()
+			values, err := marshalValues(map[string]any{
 				"argocd":      map[string]any{"namespace": "argo-cd"},
 				"scaffolding": map[string]any{"mode": "Always"},
 			})
+			if err != nil {
+				t.Fatalf("values: %v", err)
+			}
 			docs := MustHelmTemplate(t, values, nil)
 			parent := Find(t, docs, "Template", parentTemplateName)
-			params := paramMap(parent)
+			params := paramMap(t, parent)
 			for k, v := range clusterWith(tc.ic) {
 				params[k] = v
 			}
@@ -128,23 +145,83 @@ func TestPrivilegedFilterFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatalf("render succeeded with no privileged.namespaces; destinations would include privileged namespaces:\n%s", out)
 			}
-			if !strings.Contains(err.Error(), "privileged.namespaces is absent") {
+			if !strings.Contains(err.Error(), "privileged.namespaces is absent or null") {
 				t.Errorf("failed for the wrong reason: %v", err)
 			}
 		})
 	}
 
+	// An explicit null is nastier than absence: hasKey is TRUE for a key
+	// holding null, and `| default list` would quietly turn the null into []
+	// -- privileged filtering disabled for every tenant at once, from a shape
+	// `kubectl edit` can produce. This is the fail-open the guard must catch.
+	t.Run("privileged with null namespaces", func(t *testing.T) {
+		values, err := marshalValues(map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd"},
+			"scaffolding": map[string]any{"mode": "Always"},
+		})
+		if err != nil {
+			t.Fatalf("values: %v", err)
+		}
+		docs := MustHelmTemplate(t, values, nil)
+		parent := Find(t, docs, "Template", parentTemplateName)
+		params := paramMap(t, parent)
+		for k, v := range clusterWith(map[string]any{
+			"accessControl": map[string]any{"privileged": map[string]any{
+				"namespaces": nil, "groups": []any{"admins"}}},
+		}) {
+			params[k] = v
+		}
+		gotmpl, _ := spec(parent)["gotemplate"].(string)
+		out, err := Gotemplate(gotmpl, params, Instance{Name: parentTemplateName, Namespace: "ns"})
+		if err == nil {
+			t.Fatalf("render succeeded with privileged.namespaces: null; filtering would be silently disabled:\n%s", out)
+		}
+		if !strings.Contains(err.Error(), "privileged.namespaces is absent or null") {
+			t.Errorf("failed for the wrong reason: %v", err)
+		}
+	})
+
+	// accessControl explicitly null must reach the SAME actionable message,
+	// not a Go type-assertion error from dig needing a map at every level.
+	t.Run("null accessControl", func(t *testing.T) {
+		values, err := marshalValues(map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd"},
+			"scaffolding": map[string]any{"mode": "Always"},
+		})
+		if err != nil {
+			t.Fatalf("values: %v", err)
+		}
+		docs := MustHelmTemplate(t, values, nil)
+		parent := Find(t, docs, "Template", parentTemplateName)
+		params := paramMap(t, parent)
+		for k, v := range clusterWith(map[string]any{"accessControl": nil}) {
+			params[k] = v
+		}
+		gotmpl, _ := spec(parent)["gotemplate"].(string)
+		_, err = Gotemplate(gotmpl, params, Instance{Name: parentTemplateName, Namespace: "ns"})
+		if err == nil {
+			t.Fatal("render succeeded with accessControl: null")
+		}
+		if !strings.Contains(err.Error(), "privileged.namespaces is absent or null") {
+			t.Errorf("null accessControl should reach the actionable guard, not a type error: %v", err)
+		}
+	})
+
 	// An uncompilable pattern must fail too. sprig's regexMatch discards the
 	// compile error, so a typo in the cluster's IntegrationConfig would stop
 	// filtering for every tenant at once.
 	t.Run("uncompilable regex", func(t *testing.T) {
-		values, _ := marshalValues(map[string]any{
+		values, err := marshalValues(map[string]any{
 			"argocd":      map[string]any{"namespace": "argo-cd"},
 			"scaffolding": map[string]any{"mode": "Always"},
 		})
+		if err != nil {
+			t.Fatalf("values: %v", err)
+		}
 		docs := MustHelmTemplate(t, values, nil)
 		parent := Find(t, docs, "Template", parentTemplateName)
-		params := paramMap(parent)
+		params := paramMap(t, parent)
 		for k, v := range clusterWith(map[string]any{
 			"accessControl": map[string]any{"privileged": map[string]any{
 				"namespaces": []any{"^openshift-["}, "groups": []any{}}},
@@ -154,6 +231,41 @@ func TestPrivilegedFilterFailsClosed(t *testing.T) {
 		gotmpl, _ := spec(parent)["gotemplate"].(string)
 		if out, err := Gotemplate(gotmpl, params, Instance{Name: parentTemplateName, Namespace: "ns"}); err == nil {
 			t.Fatalf("an uncompilable privileged pattern rendered successfully:\n%s", out)
+		}
+	})
+
+	// An empty-string pattern is a valid empty regex matching EVERY namespace,
+	// so the uncompilable-regex guard misses it and it would strip all
+	// destinations from every tenant -- the parent must refuse it. ".*" is the
+	// same match-all but a legitimate deny-all, so it must still render.
+	t.Run("empty privileged pattern", func(t *testing.T) {
+		values, err := marshalValues(map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd"},
+			"scaffolding": map[string]any{"mode": "Always"},
+		})
+		if err != nil {
+			t.Fatalf("values: %v", err)
+		}
+		docs := MustHelmTemplate(t, values, nil)
+		parent := Find(t, docs, "Template", parentTemplateName)
+		gotmpl, _ := spec(parent)["gotemplate"].(string)
+
+		render := func(patterns []any) (string, error) {
+			params := paramMap(t, parent)
+			for k, v := range clusterWith(map[string]any{
+				"accessControl": map[string]any{"privileged": map[string]any{
+					"namespaces": patterns, "groups": []any{}}},
+			}) {
+				params[k] = v
+			}
+			return Gotemplate(gotmpl, params, Instance{Name: parentTemplateName, Namespace: "ns"})
+		}
+
+		if out, err := render([]any{"^kube-", ""}); err == nil {
+			t.Fatalf("an empty privileged pattern rendered successfully:\n%s", out)
+		}
+		if _, err := render([]any{".*"}); err != nil {
+			t.Fatalf(`".*" is a legitimate deny-all and must render, but failed: %v`, err)
 		}
 	})
 }
@@ -202,6 +314,53 @@ func TestParentSurvivesEveryTenantShape(t *testing.T) {
 	}
 }
 
+// The namespace side of the same survival property: the parent LISTs every
+// Namespace in the cluster, so one Namespace with a shape the template cannot
+// read -- labels: null, no labels key at all -- would kill the PARENT and take
+// every tenant's AppProject with it. A live API server has stamped
+// kubernetes.io/metadata.name on every namespace since 1.22, so the truly
+// label-less shapes arrive through fixtures and conversion edges -- but they
+// are representable in the LIST the parameter resolves, and dying on one
+// would kill every tenant.
+func TestParentSurvivesEveryNamespaceShape(t *testing.T) {
+	rendered, childErrs := TwoStage(t, Fixture{
+		Values: map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd"},
+			"scaffolding": map[string]any{"mode": "Always"},
+		},
+		Cluster: map[string]any{
+			"tenants": []any{
+				map[string]any{"metadata": map[string]any{"name": "alpha"}, "spec": map[string]any{}},
+			},
+			"namespaces": []any{
+				map[string]any{"metadata": map[string]any{"name": "no-labels-key"}},
+				map[string]any{"metadata": map[string]any{"name": "null-labels", "labels": nil}},
+				map[string]any{"metadata": map[string]any{"name": "empty-labels", "labels": map[string]any{}}},
+				map[string]any{"metadata": map[string]any{"name": "alpha-app", "labels": map[string]any{"stakater.com/tenant": "alpha"}}},
+			},
+			"integrationConfig": map[string]any{
+				"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{}, "groups": []any{}}},
+			},
+		},
+	})
+	for name, err := range childErrs {
+		t.Errorf("child %s failed: %v", name, err)
+	}
+	docs, err := Documents(rendered)
+	if err != nil {
+		t.Fatalf("render is not valid YAML: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d AppProjects, want 1", len(docs))
+	}
+	sp, _ := docs[0]["spec"].(map[string]any)
+	dests := destinationNames(sp)
+	want := []string{"alpha-app", "argo-cd"}
+	if len(dests) != 2 || dests[0] != want[0] || dests[1] != want[1] {
+		t.Errorf("destinations = %v, want %v: an unlabelled namespace leaked in or the labelled one was lost", dests, want)
+	}
+}
+
 // A Tenant named `parent` used to render a child TemplateInstance called
 // mto-argocd-parent -- the chart's OWN parent. template-operator-v2 would apply
 // it, replacing the parent's objectFieldRefs with the child's parameters, so it
@@ -220,7 +379,7 @@ func TestTenantCannotCollideWithTheParentTemplateInstance(t *testing.T) {
 	parentName := meta(parent)["name"]
 
 	tmpl := Find(t, docs, "Template", parentTemplateName)
-	params := paramMap(tmpl)
+	params := paramMap(t, tmpl)
 	params["tenants"] = []any{
 		map[string]any{"metadata": map[string]any{"name": "parent"}, "spec": map[string]any{}},
 		map[string]any{"metadata": map[string]any{"name": "child"}, "spec": map[string]any{}},
@@ -262,7 +421,11 @@ func TestTenantCannotCollideWithTheParentTemplateInstance(t *testing.T) {
 // enforced it at all.
 func TestGotemplatesNeverUsePlainFromJson(t *testing.T) {
 	comment := regexp.MustCompile(`(?s)\{\{-?\s*/\*.*?\*/\s*-?\}\}`)
-	plain := regexp.MustCompile(`\bfromJson\b`) // does not match mustFromJson
+	// No trailing \b: the pattern must also catch fromJsonArray, which does
+	// not exist in template-operator-v2 at all. mustFromJson is safe from the
+	// leading \b for the right reason -- lowercase "fromJson" never appears
+	// inside it (the F is capital), so the word boundary sits before "must".
+	plain := regexp.MustCompile(`\bfromJson`)
 
 	files, err := filepath.Glob(filepath.Join("..", "..", "charts", "mto-extension-argocd", "files", "*.tpl"))
 	if err != nil || len(files) == 0 {

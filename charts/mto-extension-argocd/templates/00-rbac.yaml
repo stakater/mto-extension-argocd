@@ -10,7 +10,9 @@ because anything whose admission check references another object cannot be
 co-rendered with it -- template-operator-v2 dry-runs the whole render, and a
 RoleBinding is admitted against a Role that does not exist yet.
 */ -}}
-{{- if .Values.rbac.create }}
+{{- /* Nil-safe so `rbac: null` under --skip-schema-validation reads as
+       "don't create" instead of a nil-pointer stack trace. */ -}}
+{{- if (.Values.rbac).create }}
 {{- $sa := .Values.rbac.serviceAccount }}
 {{- /* Cluster-scoped names are release-scoped. Fixed names mean a second
        install anywhere on the cluster fails with "invalid ownership metadata",
@@ -25,6 +27,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ $prefix }}-argocd-observe
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 rules:
@@ -42,6 +46,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: {{ $prefix }}-argocd-observe
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 roleRef:
@@ -64,6 +70,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ $prefix }}-argocd-write
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 rules:
@@ -81,6 +89,8 @@ kind: RoleBinding
 metadata:
   name: {{ $prefix }}-argocd-write
   namespace: {{ .Values.argocd.namespace }}
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 roleRef:
@@ -99,6 +109,8 @@ kind: Role
 metadata:
   name: mto-extension-argocd-children
   namespace: {{ .Values.operatorNamespace }}
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 rules:
@@ -116,6 +128,8 @@ kind: RoleBinding
 metadata:
   name: mto-extension-argocd-children
   namespace: {{ .Values.operatorNamespace }}
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 roleRef:
@@ -134,6 +148,8 @@ kind: Role
 metadata:
   name: mto-extension-argocd-integrationconfig-read
   namespace: {{ .Values.integrationConfig.namespace }}
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 rules:
@@ -146,6 +162,8 @@ kind: RoleBinding
 metadata:
   name: mto-extension-argocd-integrationconfig-read
   namespace: {{ .Values.integrationConfig.namespace }}
+  annotations:
+    {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
     {{- include "mto-extension-argocd.labels" . | nindent 4 }}
 roleRef:

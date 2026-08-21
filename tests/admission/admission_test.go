@@ -26,8 +26,11 @@
 package admission
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +38,9 @@ import (
 	"testing"
 
 	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
+	goyaml "gopkg.in/yaml.v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -72,7 +77,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
-	_ = env.Stop()
+	// A failed Stop leaks a kube-apiserver and etcd on the developer's machine;
+	// say so rather than leaving them to be found in `ps` a week later. The exit
+	// code stays the suite's own -- a leak is worth a line, not a red build.
+	if err := env.Stop(); err != nil {
+		fmt.Fprintf(os.Stderr, "stopping envtest: %v (kube-apiserver/etcd may still be running)\n", err)
+	}
 	os.Exit(code)
 }
 
@@ -163,7 +173,14 @@ func TestRenderedObjectsAreAccepted(t *testing.T) {
 				// controller, envtest never finishes deleting one.
 				if obj.GetNamespace() == "" && obj.GetKind() != "Namespace" {
 					toDelete := obj.DeepCopy()
-					t.Cleanup(func() { _ = c.Delete(ctx, toDelete) })
+					// Logged, not discarded: a failed delete here surfaces on
+					// the NEXT case as AlreadyExists, and this line is what
+					// explains it.
+					t.Cleanup(func() {
+						if err := c.Delete(ctx, toDelete); err != nil && !apierrors.IsNotFound(err) {
+							t.Logf("cleanup: deleting %s %s: %v", toDelete.GetKind(), toDelete.GetName(), err)
+						}
+					})
 				}
 			}
 		})
@@ -203,17 +220,44 @@ func renderChart(t *testing.T, sets []string, values string) []*unstructured.Uns
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}
 
+	// A real YAML stream decoder, not strings.Split on "\n---\n": a rendered
+	// document that happens to carry a column-zero "---" inside a block scalar
+	// -- and this chart's Templates are mostly block scalars full of gotemplate
+	// text -- would be cut in half by a text split. Same approach as
+	// tests/render/engine.go's Documents.
 	var objs []*unstructured.Unstructured
-	for _, doc := range strings.Split(string(out), "\n---\n") {
-		if strings.TrimSpace(doc) == "" {
+	dec := goyaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var doc map[string]any
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decoding rendered stream: %v\n%s", err, out)
+		}
+		// Empty documents -- helm emits comment-only ones -- decode to nil.
+		if len(doc) == 0 {
 			continue
+		}
+		// Re-encode the split document and decode it with sigs.k8s.io/yaml,
+		// which yields JSON-compatible types (int64, never int) as it always
+		// has -- goyaml exists in this pipeline only for the stream
+		// splitting, and unstructured's DeepCopy (used by the cleanup above)
+		// panics on goyaml's plain ints.
+		raw, err := goyaml.Marshal(doc)
+		if err != nil {
+			t.Fatalf("re-encoding rendered doc: %v", err)
 		}
 		obj := &unstructured.Unstructured{}
-		if err := yaml.Unmarshal([]byte(doc), obj); err != nil {
-			t.Fatalf("decoding rendered doc: %v\n%s", err, doc)
+		if err := yaml.Unmarshal(raw, obj); err != nil {
+			t.Fatalf("decoding rendered doc: %v\n%s", err, raw)
 		}
+		// A non-empty document with no kind is a malformed render, not
+		// something to skip past -- silently dropping it from admission
+		// checking would shrink coverage without a trace.
 		if obj.GetKind() == "" {
-			continue
+			t.Fatalf("rendered document has no kind:\n%s", raw)
 		}
 		objs = append(objs, obj)
 	}

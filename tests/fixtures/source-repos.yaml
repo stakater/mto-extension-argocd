@@ -4,11 +4,14 @@
 # every tenant deploy from every other tenant's repos. The only shareable form
 # is a pattern templated on the tenant name, which is what this pins.
 #
-#   patterned   the chart pattern with {{ tenant }} expanded per tenant.
-#   overridden  the Tenant's own annotation wins outright -- no merge with the
-#               pattern, or a tenant could never narrow its own access.
-#   emptied     an explicit "[]" yields no sourceRepos field at all, which is
-#               how a tenant opts out of a pattern the platform team set.
+#   patterned     the chart pattern with {{ tenant }} expanded per tenant.
+#   overridden    the Tenant's own annotation wins outright -- no merge with
+#                 the pattern, or a tenant could never narrow its own access.
+#   emptied       an explicit "[]" yields no sourceRepos field at all, which
+#                 is how a tenant opts out of a pattern the platform team set.
+#   empty-string  "" is the near-miss of "[]", and it must fail THIS child
+#                 loudly rather than silently fall back to expanding the
+#                 pattern -- the author plainly meant to override something.
 #
 # The "neither pattern nor annotation" case is covered by privileged.yaml,
 # whose golden carries no sourceRepos key. That is the shipping default, and it
@@ -26,6 +29,9 @@ values:
       pattern: https://github.com/acme/{{ tenant }}-gitops
   scaffolding:
     mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-empty-string: "unexpected end of JSON input"
 
 cluster:
   integrationConfig:
@@ -51,7 +57,14 @@ cluster:
           argocd.tenantoperator.stakater.com/source-repos: "[]"
       spec: {}
 
+    - metadata:
+        name: empty-string
+        annotations:
+          argocd.tenantoperator.stakater.com/source-repos: ""
+      spec: {}
+
   namespaces:
     - metadata: { name: patterned-dev, labels: { stakater.com/tenant: patterned } }
     - metadata: { name: overridden-dev, labels: { stakater.com/tenant: overridden } }
     - metadata: { name: emptied-dev, labels: { stakater.com/tenant: emptied } }
+    - metadata: { name: empty-string-dev, labels: { stakater.com/tenant: empty-string } }

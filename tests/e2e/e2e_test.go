@@ -20,11 +20,15 @@
 //
 // BORROWED -- against a licensed cluster that already runs MTO:
 //
-//	E2E=1 \
 //	KUBE_CONTEXT=<context> \
 //	E2E_TENANT=<an existing tenant to borrow> \
 //	E2E_ARGO_NAMESPACE=<where ArgoCD runs> \
-//	go test ./tests/e2e/... -v -timeout 20m
+//	make e2e-test
+//
+// `make e2e-test` rather than a bare `go test`: the target sets E2E=1 and pins
+// HELM to bin/helm. A bare invocation with no HELM= installs the chart with
+// whatever helm is on PATH -- exactly the version drift tests/internal/helm
+// exists to end.
 //
 // It borrows rather than creates there because MTO's free tier caps a cluster
 // at two Tenants and its namespace webhook refuses any namespace without a
@@ -168,9 +172,12 @@ func envOr(k, def string) string {
 // expectRetain reports whether this run ASSERTS the retain contract instead of
 // merely reporting which behaviour it observed. Which one you get is a property
 // of the template-operator-v2 build (TOV2-1): released builds up to 0.0.6
-// delete on descaffold, 8a44194+ releases. A lane that installs a fixed
-// operator sets E2E_EXPECT_RETAIN=1 so a chart regression in release semantics
-// cannot hide behind "not implemented in this build".
+// delete on descaffold, 8a44194+ releases.
+//
+// TODO: no lane sets E2E_EXPECT_RETAIN=1 yet. Wire it into the kind lane the
+// moment a fixed operator version is pinned (see TOV2_CHART_VERSION in the
+// Makefile) -- until then a chart regression in release semantics can hide
+// behind "not implemented in this build".
 func expectRetain() bool { return os.Getenv("E2E_EXPECT_RETAIN") != "" }
 
 // TestLifecycle runs the scenarios in dependency order against one install.
@@ -212,7 +219,8 @@ func TestLifecycle(t *testing.T) {
 		if got := spec["description"]; got != "Managed by mto-extension-argocd" {
 			t.Errorf("description = %v", got)
 		}
-		// S19: the ArgoCD namespace is always a destination. On a tenant with
+		// S19 (scenario tags refer to docs/plans/TASKS-argocd-extension.md):
+		// the ArgoCD namespace is always a destination. On a tenant with
 		// no labelled namespaces it is the ONLY one -- and the tenant must
 		// still get a project rather than be skipped.
 		if !contains(destinations(spec), argoNS) {
@@ -747,16 +755,29 @@ func waitReady(t *testing.T, gvk schema.GroupVersionKind, ns, name string) {
 	waitFor(t, name+" to be Ready", func() bool { return isReady(t, get(t, gvk, ns, name)) })
 }
 
+// waitTimeout bounds every waitFor. Generous because these waits are for
+// template-operator-v2 to reconcile, and its latency balloons under CPU
+// contention -- a 2-minute budget flaked there while the operator was merely
+// slow. Overridable with E2E_WAIT_TIMEOUT (a Go duration) for a loaded runner.
+var waitTimeout = func() time.Duration {
+	if v := os.Getenv("E2E_WAIT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 4 * time.Minute
+}()
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(waitTimeout)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
 		time.Sleep(3 * time.Second)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	t.Fatalf("timed out waiting for %s after %s (raise E2E_WAIT_TIMEOUT if the cluster is under load)", what, waitTimeout)
 }
 
 // annotate and unannotate act on the tenant under test. The *Tenant variants

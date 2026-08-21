@@ -3,15 +3,14 @@
 // produces rather than on the Template CR that carries it.
 //
 // This is a deliberate mirror of the operator's renderer, not an approximation
-// of it. template-operator-v2 does exactly this, in
-// internal/controller/templateinstance_controller.go:677:
+// of it. template-operator-v2's TemplateInstance controller does exactly this:
 //
 //	template.New("template").Funcs(SafeSprigFuncs()).Parse(templateStr)
 //
-// and SafeSprigFuncs (internal/controller/controller_utils.go:29) is
-// sprig.TxtFuncMap() with three entries deleted. Both live under internal/ in
-// a private module, so they cannot be imported -- but sprig is public, and the
-// twelve lines below reproduce the engine exactly.
+// and its SafeSprigFuncs (internal/controller/controller_utils.go, inspected
+// at tov2 v0.0.6) is sprig.TxtFuncMap() with three entries deleted. Both live
+// under internal/ in a private module, so they cannot be imported -- but sprig
+// is public, and safeSprigFuncs below reproduces the engine exactly.
 //
 // The alternative, rendering gotemplates through Helm, is NOT equivalent: Helm
 // overrides sprig's fromJson and toJson with its own map-only versions, adds
@@ -49,10 +48,12 @@ func safeSprigFuncs() template.FuncMap {
 }
 
 // Instance is the .instance context the operator exposes alongside .parameters.
+// It is flattened into the template context by hand in Gotemplate below; no
+// serialization path populates it.
 type Instance struct {
-	Name      string            `yaml:"name"`
-	Namespace string            `yaml:"namespace"`
-	Labels    map[string]string `yaml:"labels,omitempty"`
+	Name      string
+	Namespace string
+	Labels    map[string]string
 }
 
 // Gotemplate renders one gotemplate against one parameter set, exactly as

@@ -56,6 +56,9 @@ reaped both children *and both AppProjects*; annotating `pe` brought exactly `pe
 **`fromJsonArray` does not exist.** Probed on the deployed version: `fromJson` ✅, `mustFromJson` ✅,
 `fromJsonArray` ❌, `fromYaml` ❌ (the last is a Helm function, not sprig). `fromJson` decodes a
 top-level JSON array correctly, so use that. `02-templates.yaml` uses `fromJson` throughout.
+*Superseded: the shipped chart uses `mustFromJson` only, enforced by
+`TestGotemplatesNeverUsePlainFromJson` — see
+[charts/mto-extension-argocd/files/child-gotemplate.tpl](../../../charts/mto-extension-argocd/files/child-gotemplate.tpl).*
 
 **JSON encoding of list parameters is mandatory, not stylistic.** Tenant `sos` has zero labelled
 namespaces and its parameter resolved as the string `"[]"` — fine. A comma-joined empty list would be

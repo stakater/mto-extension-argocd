@@ -83,10 +83,9 @@ and status updates on **TOV2-1** and **TOV2-8**.
 
 ## E — Migration
 
-**Done, but not as written here.** Delivered as
-[`MIGRATION.md`](../../MIGRATION.md) plus
-[`hack/mto-argocd-migrate`](../../hack/mto-argocd-migrate), pinned by
-`tests/migrate`. Two recorded reversals:
+**Done, but not as written here.** Delivered as `MIGRATION.md` plus
+`hack/mto-argocd-migrate`, pinned by `tests/migrate`. *All three have since
+moved to a follow-up PR and do not exist in this repository yet.* Two recorded reversals:
 
 - **E1 is a script subcommand, not a Helm-hook Job.** A `pre-upgrade` hook Job
   re-runs on every upgrade, needs an image in a chart that deliberately has none,
@@ -102,6 +101,9 @@ and status updates on **TOV2-1** and **TOV2-8**.
   constraints and means two writers never own the same `AppProject` at all. No
   staging soak is needed for a collision that cannot occur, and there is no
   dependency on a tenant-operator release that makes the controller default-off.
+
+*The tooling and documents these rows name ship in the follow-up migration PR,
+not this one.*
 
 | ID | Task | Acceptance |
 |---|---|---|

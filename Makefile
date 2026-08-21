@@ -38,8 +38,16 @@ $(LOCALBIN):
 .PHONY: helm
 helm: $(HELM) ## Download helm locally if necessary.
 $(HELM): | $(LOCALBIN)
-	curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
-		| HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false DESIRED_VERSION=$(HELM_VERSION) bash
+	@# Fetched to a file, then run -- never `curl | bash` (the cluster target's
+	@# comment explains why). And pinned to a commit, not main: this used to
+	@# pipe whatever helm/helm's main branch carried on the day CI ran. The SHA
+	@# is the commit tag v3.16.3 peels to, resolved 2026-08-21; the script only
+	@# downloads the release named by DESIRED_VERSION, so it need not move in
+	@# step with HELM_VERSION.
+	curl -fsSL -o $(LOCALBIN)/get-helm-3 \
+		https://raw.githubusercontent.com/helm/helm/cfd07493f46efc9debd9cc1b02a0961186df7fdf/scripts/get-helm-3
+	HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false DESIRED_VERSION=$(HELM_VERSION) \
+		bash $(LOCALBIN)/get-helm-3
 
 .PHONY: helm-lint
 helm-lint: helm ## Lint the chart. argocd.namespace is required, so lint has to supply one.
@@ -179,6 +187,10 @@ ARGOCD_URL ?= https://raw.githubusercontent.com/argoproj/argo-cd/$(ARGOCD_VERSIO
 # operator against this chart.
 TOV2_RELEASE ?= template-operator-v2
 TOV2_CHART ?= oci://ghcr.io/stakater/public/charts/template-operator-v2
+# TODO: once a template-operator-v2 version with the delete-retain fix is
+# pinned here, set E2E_EXPECT_RETAIN=1 in the e2e-kind lane so the retain
+# assertions in tests/e2e stop being report-only -- today they pass in every
+# environment because no lane sets the flag.
 TOV2_CHART_VERSION ?= 0.0.6
 TOV2_IMG ?=
 TOV2_SRC ?=
@@ -217,8 +229,11 @@ cluster: | $(LOCALBIN) ## Create the kind cluster (idempotent). Shared with ever
 	@# Fetched to a file, then run -- never `curl | bash`. Piping executes
 	@# whatever partial or error output curl produced before failing, and -f
 	@# keeps an HTTP error page from being executable at all.
+	@# Pinned to a commit, not refs/heads/main, so a push to stakater/.github
+	@# cannot change what this target executes. The SHA is stakater/.github's
+	@# main as of 2026-08-21; bump it deliberately to pick up script changes.
 	curl -fsSL -o $(LOCALBIN)/setup-kind-cluster.sh \
-		https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/setup-kind-cluster.sh
+		https://raw.githubusercontent.com/stakater/.github/77c4bea83766c7dbf77fb3107df9efb9a07eb0e4/.github/scripts/setup-kind-cluster.sh
 	TEST_CLUSTER_NAME=$(TEST_CLUSTER_NAME) \
 	CONTAINER_TOOL=$(CONTAINER_TOOL) \
 	KIND_VERSION=$(KIND_VERSION) \

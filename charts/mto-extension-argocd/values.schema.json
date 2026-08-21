@@ -11,6 +11,7 @@
     "integrationConfig",
     "tenantNamespaceLabel",
     "sync",
+    "onDeletePurgeAppProject",
     "rbac"
   ],
   "properties": {
@@ -178,7 +179,7 @@
     },
     "onDeletePurgeAppProject": {
       "type": "boolean",
-      "description": "null renders value: \"<nil>\", which fails every child with an error that points at the tenant's annotation rather than at this value."
+      "description": "Default for whether deleting or descaffolding a Tenant deletes its AppProject; false retains. Overridable per Tenant with the on-delete-purge annotation. Required and boolean so an explicit null is refused at install time -- helm strips explicitly-null keys before validation, so the required marker catches it here and _helpers.tpl repeats the check for schema-skipping render paths."
     },
     "rbac": {
       "type": "object",

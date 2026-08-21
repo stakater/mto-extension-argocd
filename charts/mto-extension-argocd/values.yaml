@@ -13,6 +13,15 @@
 # a prerequisite -- the IntegrationConfig is there -- and this chart creates no
 # namespace, so pointing it somewhere new fails the install unless you create
 # that namespace first.
+#
+# In practice one release per cluster while rbac.create is true. The Template
+# and Role names are fixed (mto-argocd-parent, mto-argocd-child,
+# mto-extension-argocd-children, mto-extension-argocd-integrationconfig-read),
+# so a second release sharing operatorNamespace fails with "invalid ownership
+# metadata" -- and even in different operatorNamespaces, both releases would
+# read the same singleton IntegrationConfig and collide on the fixed-name
+# integrationconfig-read Role in ITS namespace. The cluster-scoped RBAC names
+# are release-prefixed, but that alone does not make a second install safe.
 operatorNamespace: multi-tenant-operator
 
 argocd:
@@ -25,8 +34,9 @@ argocd:
   # A blank value does NOT render zero children -- $argoNs never gates emission.
   # It renders one child per tenant, each producing an AppProject with an empty
   # namespace, which the API server rejects. Every tenant breaks at once. The
-  # schema's minLength is the only thing standing between a typo and that
-  # outcome; do not relax it. Formerly read from IntegrationConfig .spec.integrations.argocd
+  # schema's minLength catches a typo at install time, and _helpers.tpl repeats
+  # the check for the render paths that skip the schema; do not relax either.
+  # Formerly read from IntegrationConfig .spec.integrations.argocd
   # .namespace, which is deprecated.
   namespace: ""
 
@@ -80,8 +90,8 @@ scaffolding:
   # have confirmed otherwise on your own cluster.
   mode: OnAnnotation
 
-  # The annotation key checked in OnAnnotation mode, and its expected value.
-  # Configurable so the match key is the platform team's choice.
+  # The annotation key checked in OnAnnotation mode. Only the key is
+  # configurable; the expected value is always exactly "true".
   annotations:
     enabled: argocd.tenantoperator.stakater.com/enabled
 
@@ -91,9 +101,10 @@ scaffolding:
 
 # Annotation keys read off each Tenant for the four per-tenant overrides.
 # Absent annotation inherits the chart default above; an explicit `[]`
-# overrides with empty. Malformed JSON fails that tenant's child rather than
-# falling back -- applies are server-side, so a silent fallback would strip the
-# field from a live AppProject.
+# overrides with empty. Malformed JSON -- and an explicit empty string, the
+# near-miss of `[]` -- fails that tenant's child rather than falling back:
+# applies are server-side, so a silent fallback would strip the field from a
+# live AppProject.
 annotations:
   sourceRepos: argocd.tenantoperator.stakater.com/source-repos
   clusterResourceWhitelist: argocd.tenantoperator.stakater.com/cluster-resource-whitelist

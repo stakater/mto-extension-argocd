@@ -23,13 +23,22 @@ spec:
       value: {{ .Values.operatorNamespace | quote }}
     - name: childTemplateName
       value: {{ include "mto-extension-argocd.childTemplateName" . | quote }}
-    {{- /* values.schema.json enforces minLength 1 on argocd.namespace. A blank
-           value does not render zero children -- it renders one per tenant,
-           each emitting an AppProject with an empty namespace that the API
-           server rejects. Every tenant breaks at once. */}}
+    {{- /* values.schema.json enforces minLength 1 on argocd.namespace, and the
+           include repeats the check for the schema-skipping render paths. A
+           blank value does not render zero children -- it renders one per
+           tenant, each emitting an AppProject with an empty namespace that the
+           API server rejects. Every tenant breaks at once. */}}
+    {{- include "mto-extension-argocd.validateArgoNamespace" . }}
     - name: argoNamespace
       value: {{ .Values.argocd.namespace | quote }}
       exposeInStatus: true
+    {{- /* Covers tenantNamespaceLabel, both scaffolding keys and the four
+           override annotation keys below: an empty key matches nothing, so the
+           override it carries is silently ignored. */}}
+    {{- include "mto-extension-argocd.validateOverrideKeys" . }}
+    {{- /* The override annotation keys and the opt-in annotation key share the
+           Tenant's annotation map; a duplicate makes them read each other. */}}
+    {{- include "mto-extension-argocd.validateKeyCollisions" . }}
     - name: tenantNamespaceLabel
       value: {{ .Values.tenantNamespaceLabel | quote }}
     {{- include "mto-extension-argocd.validateScaffoldingMode" . }}
@@ -39,13 +48,15 @@ spec:
       value: {{ .Values.scaffolding.annotations.enabled | quote }}
     - name: scaffoldingLabelKey
       value: {{ .Values.scaffolding.labels.enabled | quote }}
+    {{- include "mto-extension-argocd.validateDefaultLists" . }}
     - name: defaultWhitelistJson
       value: {{ .Values.argocd.clusterResourceWhitelist | default list | toJson | quote }}
     - name: defaultBlacklistJson
       value: {{ .Values.argocd.namespaceResourceBlacklist | default list | toJson | quote }}
     {{- include "mto-extension-argocd.validateSourceReposPattern" . }}
     - name: sourceReposPattern
-      value: {{ .Values.argocd.sourceRepos.pattern | default "" | quote }}
+      value: {{ (.Values.argocd.sourceRepos).pattern | default "" | quote }}
+    {{- include "mto-extension-argocd.validateOnDeletePurge" . }}
     - name: defaultOnDeletePurge
       value: {{ .Values.onDeletePurgeAppProject | toString | quote }}
     - name: annotationSourceRepos

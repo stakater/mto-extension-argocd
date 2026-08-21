@@ -18,12 +18,16 @@
 #                  fall back to the default: applies are server-side with
 #                  ForceOwnership, so a silent fallback would strip the field
 #                  from a live AppProject.
+#   empty-string   "" is the near-miss of "[]": the author plainly meant to
+#                  override SOMETHING. dig-with-default read it as unset and
+#                  silently inherited the chart default; passed down verbatim
+#                  it fails this child loudly, like malformed JSON.
 #   bad-purge      "True" is not "true". Read leniently it would silently mean
 #                  the opposite of what the author intended, on the one setting
 #                  that decides whether an AppProject survives deletion.
 #
-# The golden proves the isolation: malformed and bad-purge are absent from it,
-# every other tenant rendered.
+# The golden proves the isolation: malformed, empty-string and bad-purge are
+# absent from it, every other tenant rendered.
 
 values:
   argocd:
@@ -38,6 +42,7 @@ values:
 
 expectChildErrors:
   mto-argocd-tenant-malformed: "invalid character"
+  mto-argocd-tenant-empty-string: "unexpected end of JSON input"
   mto-argocd-tenant-bad-purge: 'on-delete-purge must be exactly "true" or "false"'
 
 cluster:
@@ -80,6 +85,14 @@ cluster:
       spec:
         accessControl:
           owners: { groups: [malformed-owners] }
+
+    - metadata:
+        name: empty-string
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: ""
+      spec:
+        accessControl:
+          owners: { groups: [empty-string-owners] }
 
     - metadata:
         name: bad-purge

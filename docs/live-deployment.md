@@ -4,7 +4,28 @@ There is a **running install of this chart** on the shared OpenShift cluster.
 It is deliberately left up. Do not tear it down without telling whoever is
 using it.
 
-Last deployed 2026-08-06.
+First deployed 2026-08-06.
+
+> **Update 2026-08-21.** The install was refreshed and re-verified end to end:
+>
+> - **Chart upgraded to the current branch** (release revision 8). This pulls in
+>   the YAML-injection hardening — the 0.1.0 install rendered tenant-controlled
+>   strings (`name: {{ $t }}`, destinations, group names) unquoted; they are now
+>   `{{ $t | quote }}`.
+> - **template-operator-v2 upgraded v0.0.5 → v0.0.7** (release revision 4,
+>   `--reset-values`). Before applying, the 0.0.7 chart was checked to render the
+>   sync-enforcement webhook *with* its label-scoped `matchConditions` — without
+>   it, `failurePolicy: Fail` on `*/*/*` deadlocks the whole cluster (TOV2-9). It
+>   does; re-verified live after the upgrade. The other tenants of this shared
+>   operator (openbao configs, `demo-consumer`) were `Ready` before and after.
+> - **Retain-on-delete (TOV2-1) is now enforced here.** Descaffolding `team-a`
+>   left `AppProject/team-a` in place with the **same UID**, finalizer and
+>   ownership label stripped; re-scaffolding re-adopted it in place, UID
+>   preserved. On v0.0.5 the same descaffold deleted the project. See
+>   [When an AppProject gets deleted](#when-an-appproject-gets-deleted).
+> - **The opted-in tenant is now `team-a`, not `sos`** — `sos` no longer exists
+>   on the cluster. Historical `sos` examples below are left as written where
+>   they only illustrate output shape.
 
 ## Where
 
@@ -12,8 +33,8 @@ Last deployed 2026-08-06.
 |---|---|
 | Cluster | `160.79.117.160`, OpenShift 4.20 (k8s v1.33.5) |
 | kube context | `default/160-79-117-160:6443/ayesha.arshad@stakater.com` |
-| Helm release | `mto-argocd` in `stakater-tenant-operator` |
-| template-operator-v2 | v0.0.5, `stakater-template-operator` |
+| Helm release | `mto-argocd` in `stakater-tenant-operator` (chart 0.1.0, rev 8) |
+| template-operator-v2 | **v0.0.7**, `stakater-template-operator` (chart 0.0.7, rev 4) |
 | ArgoCD | 3.4.6, `stakater-tenant-operator` |
 | MTO | v1.8.2 |
 
@@ -51,8 +72,15 @@ independent values; nothing requires them to match.
 
 ## Which tenants are opted in
 
-Only **`sos`**. `pe` was migrated on 2026-08-07 to verify the runbook and then
-rolled back the same day, so the cluster is in its original state — see
+Only **`team-a`** (as of the 2026-08-21 refresh). The cluster's two Tenants are
+now `pe` and `team-a`; the `sos` Tenant the original writeup used no longer
+exists. `team-a` is owned by `ayesha.arshad@stakater.com` and is used here as
+the live end-to-end subject: opt-in renders `AppProject/team-a` with the two
+namespaces `team-a-api` and the ArgoCD namespace as destinations, three roles,
+and `deletion-policy: Orphan` (retain).
+
+`pe` was migrated on 2026-08-07 to verify the runbook and then rolled back the
+same day, so it is back on the old controller — see
 [Migration, verified end to end](#migration-verified-end-to-end).
 
 **`pe` must NOT be opted in while `Extensions/pe-extensions` exists.** Two
@@ -77,7 +105,7 @@ kubectl --context="$CTX" get appprojects.argoproj.io -n $NS -o json \
   | jq -r '.items[] | "\(.metadata.name) ours=\(.metadata.annotations["templates.v2.stakater.com/instance-ref"] // "no")"'
 
 # what a tenant got
-kubectl --context="$CTX" get appprojects.argoproj.io -n $NS sos -o yaml
+kubectl --context="$CTX" get appprojects.argoproj.io -n $NS team-a -o yaml
 ```
 
 **Use fully-qualified resource names.** OpenShift ships its own
@@ -89,20 +117,22 @@ operator is not reconciling".
 
 | Object | Owner |
 |---|---|
-| `AppProject/sos` | this chart |
-| `Application/sos-allowed-dest` | a live demonstration, see below — manual sync, deploys nothing |
+| `AppProject/team-a` | this chart (opted in 2026-08-21) |
 | `AppProject/pe` | the Go controller — migrated to the chart on 2026-08-07 and **rolled back the same day** |
 | `AppProject/default` | ArgoCD's own — leave alone |
 | `Extensions/pe-extensions` | restored by the rollback; healthy, `AppProjectSynced` |
 
-Tenant `sos` also carries a `source-repos` annotation, added to make the
-project usable — see the finding below. `pe` does not, so its project still
-permits no repositories — faithfully, which is the point.
+`AppProject/team-a` carries no `source-repos` annotation, so its `sourceRepos`
+is empty and ArgoCD will not deploy from any repo in it — faithfully; add the
+annotation to make it usable (see [the finding below](#the-finding-that-matters-for-rollout)).
+The `sos` demonstration `Application` objects from the original writeup are gone
+with the `sos` Tenant.
 
 ## Migration, verified end to end
 
-Run on 2026-08-07 with [hack/mto-argocd-migrate](../hack/mto-argocd-migrate),
-following [MIGRATION.md](../MIGRATION.md). Tenant `pe` was the subject: a live
+Run on 2026-08-07 with `mto-argocd-migrate`, following its runbook — the tool
+and the runbook moved to a follow-up PR and are not in this one, but the run
+and its findings stand. Tenant `pe` was the subject: a live
 `Extensions/pe-extensions` CR and a controller-owned `AppProject/pe`, which is
 exactly the before-state a customer has.
 
@@ -148,15 +178,17 @@ IntegrationConfig, so an unseeded install would have stripped both lists here.
 - **The `onDeletePurgeAppProject: true` → `false` patch.** `pe-extensions` had no
   `spec.argoCD` block at all, so it took the nil-config retain branch rather than
   the purge branch. Arming purge on a live AppProject to test the other branch was
-  judged too dangerous to do here. Still covered only by `tests/migrate`.
+  judged too dangerous to do here. Covered by nothing in this PR — the
+  `tests/migrate` suite that pins it ships with the follow-up migration PR.
 - **A tenant with per-tenant overrides.** `pe-extensions` set none, so
-  `annotations` had nothing to carry across. Also covered only by `tests/migrate`.
+  `annotations` had nothing to carry across. Also covered by nothing here;
+  same follow-up PR.
 
 ### Rollback, also verified — and `pe` is back on the controller
 
 `pe` was migrated and then rolled back on the same day, so the cluster is once
-again in its pre-migration state. The rollback path from MIGRATION.md, run
-exactly as written:
+again in its pre-migration state. The rollback path from the migration runbook
+(follow-up PR), run exactly as written:
 
 ```bash
 kubectl apply -f pe-extensions.restore.yaml   # controller error-loops; expected
@@ -192,23 +224,35 @@ t+16s  controller-managed, uid=8bff29cd...
 **The UID change is the finding.** A rollback is a delete-and-recreate, not a
 restore, so `spec.roles[].jwtTokens` — the ArgoCD project role tokens minted by
 `argocd proj role create-token` — are destroyed with the object. Forward
-migration keeps the UID; rollback does not. Recorded in MIGRATION.md.
+migration keeps the UID; rollback does not. Recorded for the migration runbook
+in the follow-up PR.
 
 ## When an AppProject gets deleted
 
-The chart's failure modes are mostly destructive rather than degraded, because
-template-operator-v2 reaps anything the parent stops rendering. Everything below
-was checked on this cluster unless marked otherwise.
+**This changed with the v0.0.7 upgrade.** Under v0.0.5 the failure modes were
+mostly destructive: template-operator-v2 reaped anything the parent stopped
+rendering, and the retain annotation was ignored. On **v0.0.7 the retain
+annotation is honoured** — with the chart default `onDeletePurgeAppProject:
+false`, every rendered AppProject carries `deletion-policy: Orphan`, so the
+triggers below now **release** the object (it survives, unmanaged) rather than
+delete it. Set `onDeletePurgeAppProject: true` (globally, or per-tenant via the
+`on-delete-purge` annotation) to get the old delete-on-descaffold behaviour
+back. Everything below was checked on this cluster unless marked otherwise.
 
-**Deletes the AppProject:**
+**Releases the AppProject (default, purge off) / Deletes it (purge on):**
 
-| Trigger | Why |
-|---|---|
-| The opt-in annotation is removed | the tenant fails the scaffolding filter, no child is emitted, the orphan is reaped |
-| `scaffolding.mode` is narrowed | same, for every tenant the new mode excludes |
-| The Tenant is deleted or renamed | same — a renamed Tenant orphans its old child |
-| The child TemplateInstance is renamed | a chart-side change; the old child orphans. Cost one delete-and-recreate per tenant when children moved to the `mto-argocd-tenant-` prefix |
-| `helm uninstall`, or deleting the parent TemplateInstance | reaps every child at once — and deadlocks unless done in the order in NOTES.txt (TOV2-5) |
+| Trigger | What happens to the child | AppProject: purge off vs on |
+|---|---|---|
+| The opt-in annotation is removed | tenant fails the scaffolding filter, no child is emitted, the orphan is reaped | **released** (verified 2026-08-21: same UID, finalizer + label stripped) / deleted |
+| `scaffolding.mode` is narrowed | same, for every tenant the new mode excludes | released / deleted |
+| The Tenant is deleted or renamed | same — a renamed Tenant orphans its old child | released / deleted |
+| The child TemplateInstance is renamed | a chart-side change; the old child orphans. Cost one delete-and-recreate per tenant when children moved to the `mto-argocd-tenant-` prefix | released / deleted |
+| `helm uninstall`, or deleting the parent TemplateInstance | reaps every child at once — and deadlocks unless done in the order in NOTES.txt (TOV2-5) | released / deleted |
+
+Note the rename row still costs a delete-and-recreate of the AppProject even
+with retain on: release keeps the *old-named* object, and a new one is created
+for the new child name — so it remains a breaking change that earns a release
+note.
 
 **Does NOT delete it** -- each of these was tried:
 
@@ -218,10 +262,11 @@ was checked on this cluster unless marked otherwise.
 | A tenant loses all its namespaces | keeps its AppProject, with the ArgoCD namespace as its only destination (S21) |
 | The parent cannot render at all | **children and their AppProjects survive.** Pointing `integrationConfig.name` at a non-existent object put the parent in `ParametersValid=ParameterResolutionFailed`, and the child kept the same UID throughout. tov2 holds the last rendered set rather than treating "cannot render" as "render nothing" — so a broken IntegrationConfig does not wipe the fleet |
 | A chart upgrade, values change or template edit | updated in place via server-side apply — same UID, only `resourceVersion` moves |
-| `onDeletePurgeAppProject: false` | **does not protect anything on this cluster** — tov2 v0.0.5 ignores the retain annotation. Honoured from `8a44194` (TOV2-1), verified on the kind E2E cluster |
+| `onDeletePurgeAppProject: false` | **now protects the AppProject on this cluster** — tov2 v0.0.7 honours the retain annotation (TOV2-1, the `8a44194` fix). Verified 2026-08-21 by descaffolding `team-a`: the project survived with its UID unchanged. Under v0.0.5 this row read "does not protect anything" |
 
-The last row of the first table is the one to plan around: renaming a child is a
-breaking change. It must be done reap-first, and it earns a release note.
+The rename row above is the one to plan around even with retain on: renaming a
+child is a breaking change. It must be done reap-first, and it earns a release
+note.
 
 ## Reading the status
 
@@ -241,7 +286,7 @@ REASON:.status.conditions[?(@.type=="Ready")].reason'
 
 ```text
 TENANT   READY   REASON
-sos      True    Reconciled
+team-a   True    Reconciled
 ```
 
 The `-l templates.v2.stakater.com/instance` selector matters: tov2 stamps that
@@ -263,17 +308,17 @@ kubectl --context="$CTX" get templateinstances.templates.v2.stakater.com \
 Healthy:
 
 ```json
-{"ready":   {"mto-argocd-sos": "[\"True\"]"},
- "reason":  {"mto-argocd-sos": "[\"Reconciled\"]"},
- "errors":  {"mto-argocd-sos": "[]"}}
+{"ready":   {"mto-argocd-tenant-sos": "[\"True\"]"},
+ "reason":  {"mto-argocd-tenant-sos": "[\"Reconciled\"]"},
+ "errors":  {"mto-argocd-tenant-sos": "[]"}}
 ```
 
 Broken — here a tenant with a malformed override annotation:
 
 ```json
-{"ready":  {"mto-argocd-sos": "[\"False\"]"},
- "reason": {"mto-argocd-sos": "[\"TemplateExecutionFailed\"]"},
- "errors": {"mto-argocd-sos": "[\"failed to execute template: ... error calling
+{"ready":  {"mto-argocd-tenant-sos": "[\"False\"]"},
+ "reason": {"mto-argocd-tenant-sos": "[\"TemplateExecutionFailed\"]"},
+ "errors": {"mto-argocd-tenant-sos": "[\"failed to execute template: ... error calling
              mustFromJson: invalid character 'b' looking for beginning of object
              key string\",\"Template rendering failed\"]"}}
 ```
@@ -295,23 +340,27 @@ prints exactly this:
 status:
   outputs:
     errors:
-      mto-argocd-sos:   '[]'
-      mto-argocd-alpha: '[]'
-      mto-argocd-beta:  '["failed to execute template: template: template:36:11: executing \"template\" at <mustFromJson .parameters.whitelistJson>: error calling mustFromJson: invalid character ''b'' looking for beginning of object key string","Template rendering failed"]'
+      mto-argocd-tenant-sos:   '[]'
+      mto-argocd-tenant-alpha: '[]'
+      mto-argocd-tenant-beta:  '["failed to execute template: template: template:36:11: executing \"template\" at <mustFromJson .parameters.whitelistJson>: error calling mustFromJson: invalid character ''b'' looking for beginning of object key string","Template rendering failed"]'
     ready:
-      mto-argocd-sos:   '["True"]'
-      mto-argocd-alpha: '["True"]'
-      mto-argocd-beta:  '["False"]'
+      mto-argocd-tenant-sos:   '["True"]'
+      mto-argocd-tenant-alpha: '["True"]'
+      mto-argocd-tenant-beta:  '["False"]'
     reason:
-      mto-argocd-sos:   '["Reconciled"]'
-      mto-argocd-alpha: '["Reconciled"]'
-      mto-argocd-beta:  '["TemplateExecutionFailed"]'
+      mto-argocd-tenant-sos:   '["Reconciled"]'
+      mto-argocd-tenant-alpha: '["Reconciled"]'
+      mto-argocd-tenant-beta:  '["TemplateExecutionFailed"]'
 ```
 
 (The `sos` rows are real; `alpha` and `beta` were synthesized into the live
 object so the quoting and serialization are exactly what kubectl produces. The
 cluster's MTO licence caps it at two Tenants, so a genuine three-tenant status
-cannot be produced there.)
+cannot be produced there. Child names throughout this section are shown as the
+current chart produces them — `mto-argocd-tenant-<tenant>`; the 2026-08-06
+install predates the tenant-prefix rename and recorded them as
+`mto-argocd-<tenant>`, so against that unupgraded install substitute the
+unprefixed names.)
 
 Three things follow:
 
@@ -333,7 +382,7 @@ One line per tenant:
 kubectl --context="$CTX" get templateinstances.templates.v2.stakater.com \
   -n stakater-tenant-operator mto-argocd-parent -o json \
   | jq -r '.status.outputs as $o | $o.ready | keys[] as $k
-      | "\($k | sub("^mto-argocd-";""))  \($o.ready[$k]|fromjson|join(""))  \($o.reason[$k]|fromjson|join(""))"'
+      | "\($k | sub("^mto-argocd-tenant-";""))  \($o.ready[$k]|fromjson|join(""))  \($o.reason[$k]|fromjson|join(""))"'
 ```
 
 ```text
@@ -346,7 +395,7 @@ is the one you want in a runbook or an alert:
 ```bash
 ... | jq -r '.status.outputs as $o | $o.ready | keys[] as $k
       | select(($o.ready[$k]|fromjson|join("")) != "True")
-      | "\($k | sub("^mto-argocd-";"")): \($o.errors[$k]|fromjson|join(" | "))"'
+      | "\($k | sub("^mto-argocd-tenant-";"")): \($o.errors[$k]|fromjson|join(" | "))"'
 ```
 
 A count by state, for a dashboard:
@@ -389,7 +438,7 @@ kubectl --context="$CTX" get templateinstances.templates.v2.stakater.com \
   -n stakater-tenant-operator mto-argocd-parent -o json \
   | jq '.status.outputs as $o
       | reduce ($o.ready|keys[]) as $k ({};
-          .[$k|sub("^mto-argocd-";"")] = {
+          .[$k|sub("^mto-argocd-tenant-";"")] = {
             ready:  ($o.ready[$k]  | fromjson | join("")),
             reason: ($o.reason[$k] | fromjson | join("")),
             errors: ($o.errors[$k] | fromjson)
@@ -412,7 +461,7 @@ landed on the cluster:
 
 ```bash
 kubectl --context="$CTX" get templateinstances.templates.v2.stakater.com \
-  -n stakater-tenant-operator mto-argocd-sos -o json | jq '.status.outputs'
+  -n stakater-tenant-operator mto-argocd-tenant-sos -o json | jq '.status.outputs'
 # {"destinations": {"sos": "[\"stakater-tenant-operator\"]"}}
 ```
 
@@ -502,36 +551,50 @@ kubectl --context="$CTX" annotate tenant <name> \
   argocd.tenantoperator.stakater.com/enabled=true --overwrite
 ```
 
-The value must be exactly `"true"`. **Removing the annotation deletes that
-tenant's AppProject** on this cluster — tov2 v0.0.5 does not enforce retain
-(TOV2-1).
+The value must be exactly `"true"`. **Removing the annotation now RELEASES that
+tenant's AppProject** on this cluster (leaves it in place, unmanaged) — tov2
+v0.0.7 honours the retain annotation with the default `onDeletePurgeAppProject:
+false` (TOV2-1). Set purge on, globally or via the tenant's `on-delete-purge`
+annotation, to delete it on descaffold instead.
 
 ## Removing it, when that time comes
 
-Not a plain `helm uninstall`. That deletes the RBAC and the TemplateInstances
-together; the RBAC goes immediately while each TemplateInstance waits on a
-finalizer that needs the RBAC to delete its AppProject, so nothing completes and
-every object needs its finalizer cleared by hand (TOV2-5).
+A plain `helm uninstall` is now safe (as of the 2026-08-21 refresh). The chart's
+RBAC carries `helm.sh/resource-policy: keep` — and, for GitOps,
+`argocd.argoproj.io/sync-options: Prune=false,Delete=false` — so it outlives the
+uninstall. Dropping the parent lets template-operator-v2 reap the children and
+release their AppProjects while the RBAC those finalizers depend on is still
+present, which is what previously deadlocked (TOV2-5).
 
 ```bash
-# 1. drop the parent; children and their AppProjects drain while RBAC exists
-kubectl --context="$CTX" delete templateinstances.templates.v2.stakater.com \
-  mto-argocd-parent -n stakater-tenant-operator
-
-# 2. wait until no mto-argocd-* children remain
-kubectl --context="$CTX" get templateinstances.templates.v2.stakater.com -n stakater-tenant-operator
-
-# 3. now the release
+# the whole release, one command
 helm --kube-context="$CTX" uninstall mto-argocd -n stakater-tenant-operator
 
-# 4. and the opt-in marker
-kubectl --context="$CTX" annotate tenant sos argocd.tenantoperator.stakater.com/enabled-
+# the opt-in marker is not a release object; clear it separately
+kubectl --context="$CTX" annotate tenant team-a argocd.tenantoperator.stakater.com/enabled-
 ```
 
-`helm uninstall` also returns before template-operator-v2 releases its
+The RBAC is deliberately retained. It is harmless once the projects drain, and
+is re-adopted on a same-name reinstall; remove it explicitly only when you want
+it gone:
+
+```bash
+kubectl --context="$CTX" delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=mto-argocd
+kubectl --context="$CTX" delete role,rolebinding \
+  mto-extension-argocd-children mto-extension-argocd-integrationconfig-read \
+  -n stakater-tenant-operator
+```
+
+`helm uninstall` still returns before template-operator-v2 releases its
 finalizer on `Template/mto-argocd-parent`; wait for that object to disappear
 before reinstalling, or the install fails with an ownership-metadata error
 (TOV2-4).
+
+> **Managed by ArgoCD?** The `helm.sh/resource-policy` annotation is Helm-only —
+> ArgoCD ignores it. The `argocd.argoproj.io/sync-options: Prune=false,Delete=false`
+> annotation is what keeps the RBAC when the *Application* is pruned or deleted,
+> so the same no-deadlock guarantee holds under GitOps. On this cluster the
+> release is Helm-managed, so both paths are covered.
 
 ## Re-running E2E against this install
 
@@ -546,7 +609,7 @@ at a different `E2E_OPERATOR_NAMESPACE`:
 ```bash
 E2E=1 \
 KUBE_CONTEXT="default/160-79-117-160:6443/ayesha.arshad@stakater.com" \
-E2E_TENANT=sos \
+E2E_TENANT=team-a \
 E2E_ARGO_NAMESPACE=stakater-tenant-operator \
 E2E_TOV2_SA=system:serviceaccount:stakater-template-operator:template-operator-v2 \
 make e2e-test
@@ -554,8 +617,9 @@ make e2e-test
 
 ## Constraints of this cluster
 
-- **MTO free tier caps it at two Tenants**, and both (`pe`, `sos`) are used. You
-  cannot create test tenants here.
+- **MTO free tier caps it at two Tenants**, and both (`pe`, `team-a`) are used.
+  You cannot create test tenants here — a third `Tenant` is refused by
+  `vtenant.kb.io` with "free tier limit reached, max allowed tenants: 2".
 - **MTO's namespace webhook refuses any namespace without a
   `stakater.com/tenant` label**, so you cannot create a scratch namespace
   either.

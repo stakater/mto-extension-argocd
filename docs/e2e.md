@@ -81,10 +81,12 @@ why.
 [.github/workflows/e2e.yaml](../.github/workflows/e2e.yaml) runs the same
 `make e2e-kind` on a GitHub runner, with kind created **on the runner itself** —
 there is no shared cluster, and no secrets. It is not part of every pull
-request: approve the PR, or add the `ok-to-test/kubernetes` label, and it runs.
-`e2e-logs/` is uploaded as an artifact when it fails.
+request: an approval from a repo owner, org member or collaborator, the
+`ok-to-test/kubernetes` label, or a manual dispatch triggers it — an approval
+from anyone else deliberately does not, because the run executes PR-authored
+code. `e2e-logs/` is uploaded as an artifact when it fails.
 
-The fast chart tests — lint, render, migrate, admission — do run on every pull
+The fast chart tests — lint, vet, render, admission — do run on every pull
 request, through `make test`. They catch most regressions in seconds; this
 suite exists for the ones that only appear when template-operator-v2 actually
 reconciles.
@@ -133,3 +135,9 @@ Worth knowing before treating a green run as "shipped":
   against them. That needs SSO and ingress.
 - **One node, no OpenShift.** `syncOCPGroups`, Routes, and SCC behaviour are
   out of reach by construction.
+- **Overlong tenant names.** `mto-argocd-tenant-<name>` exceeds the 253-char
+  object-name limit for tenant names ≥ 236 chars. The parent renders such a
+  child; what happens on-cluster — whether the one invalid child stays
+  contained or destabilizes the parent apply — is untested. TODO: a
+  `TestFailuresStayContained` case with a ≥ 236-char tenant name, once a lane
+  exists where creating one is cheap.

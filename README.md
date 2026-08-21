@@ -115,13 +115,21 @@ A complete, commented pair of examples lives in
 
 ## How it works
 
-The chart installs three objects and nothing else:
+The chart runs no controller of its own. Three template-operator-v2 objects
+are the whole mechanism:
 
 | Object | Role |
 |---|---|
 | `Template/mto-argocd-parent` | Ranges over every `Tenant`, emits one child per tenant that passes the scaffolding filter |
 | `Template/mto-argocd-child` | Renders one tenant's `AppProject` |
 | `TemplateInstance/mto-argocd-parent` | The only `TemplateInstance` in git |
+
+With `rbac.create: true`, the default, the chart also installs eight RBAC
+objects — two ClusterRoles, one ClusterRoleBinding, two Roles and three
+RoleBindings (one of them the AppProject-write binding in `argocd.namespace`,
+which is what confines mutation to that namespace) — granting
+template-operator-v2 the least privilege those three need
+([00-rbac.yaml](charts/mto-extension-argocd/templates/00-rbac.yaml)).
 
 ```text
 Tenant ───────────┐

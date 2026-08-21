@@ -1,0 +1,38 @@
+# Names that YAML coerces when unquoted. "12345" and "on" are valid DNS-1123
+# names a tenant author can genuinely pick, and the child gotemplate renders
+# them into metadata.name, metadata.namespace equivalents and destinations --
+# where an unquoted `12345` decodes as an int and an unquoted `on` as a
+# boolean, neither of which the API server accepts as a name.
+#
+# This is what makes the `| quote` calls in child-gotemplate.tpl load-bearing
+# rather than style: every other fixture uses alphabetic names, so removing
+# the quotes passes the whole suite except this golden, which pins
+#
+#   metadata.name "12345"     a string, not the int 12345
+#   destination   "on"        a string, not the bool true
+#
+# The operator decodes rendered output with YAML 1.1 semantics where on/off
+# are booleans, so this is fidelity to the cluster, not paranoia.
+values:
+  argocd:
+    namespace: argo-cd
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: "12345"
+      spec:
+        accessControl:
+          owners: { groups: ["067e61"] }
+
+  namespaces:
+    - metadata: { name: "on", labels: { stakater.com/tenant: "12345" } }
+    - metadata: { name: "12345-dev", labels: { stakater.com/tenant: "12345" } }

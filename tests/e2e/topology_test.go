@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ import (
 // PRODUCE. These assert what happens to objects that already exist -- an
 // AppProject someone else created, a namespace that changes owner, a field the
 // chart stops setting.
+//
+// Scenario tags like S19 refer to docs/plans/TASKS-argocd-extension.md.
 
 func TestLiveObjectSemantics(t *testing.T) {
 	requireManagedTenants(t)
@@ -259,9 +262,15 @@ func TestFailuresStayContained(t *testing.T) {
 	t.Run("an unreadable privileged list fails the parent and leaves the fleet alone", func(t *testing.T) {
 		before := mustGet(t, gvkAppProject, argoNS, tenant).GetResourceVersion()
 
+		// Read the live list BEFORE breaking it and restore exactly that,
+		// rather than re-hardcoding hack/e2e/integrationconfig.yaml's patterns
+		// here: a second copy of the list drifts, and this cleanup would then
+		// "restore" something the cluster never had.
+		restore := privilegedNamespacesPatch(t)
+
 		patchIntegrationConfig(t, `{"spec":{"accessControl":{"privileged":{"namespaces":null}}}}`)
 		t.Cleanup(func() {
-			patchIntegrationConfig(t, `{"spec":{"accessControl":{"privileged":{"namespaces":["^default$","^openshift-*","^kube-*"]}}}}`)
+			patchIntegrationConfig(t, restore)
 			waitReady(t, gvkTemplateIn, operatorNS, "mto-argocd-parent")
 		})
 
@@ -373,6 +382,30 @@ func patchIntegrationConfig(t *testing.T, patch string) {
 	if err := k8s.Patch(context.Background(), ic, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
 		t.Fatalf("patching the IntegrationConfig: %v", err)
 	}
+}
+
+// privilegedNamespacesPatch reads the IntegrationConfig's current privileged
+// namespaces list off the live object and returns a merge patch that puts
+// exactly that list back. Failing when the list is already absent is
+// deliberate: the test about to break it depends on there being one, and a
+// cleanup built from a missing list would "restore" the broken state.
+func privilegedNamespacesPatch(t *testing.T) string {
+	t.Helper()
+	ic := mustGet(t, gvkIntegrationConfig, operatorNS, icName)
+	spec, _ := ic.Object["spec"].(map[string]any)
+	ac, _ := spec["accessControl"].(map[string]any)
+	priv, _ := ac["privileged"].(map[string]any)
+	namespaces, ok := priv["namespaces"]
+	if !ok || namespaces == nil {
+		t.Fatal("precondition: the IntegrationConfig carries no privileged namespaces list to break and restore")
+	}
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{"accessControl": map[string]any{"privileged": map[string]any{"namespaces": namespaces}}},
+	})
+	if err != nil {
+		t.Fatalf("encoding the restore patch: %v", err)
+	}
+	return string(patch)
 }
 
 // parentOutputs returns the parent's ready and errors roll-ups, keyed by child

@@ -32,6 +32,8 @@ import (
 // Everything here is created before the tests run and removed afterwards; a
 // leftover from a killed run is adopted rather than duplicated, so re-running
 // against a still-up cluster works.
+//
+// Scenario tags like S19 and S21 refer to docs/plans/TASKS-argocd-extension.md.
 
 const (
 	// The primary tenant. Every test that needs one opted-in tenant uses this.
@@ -160,8 +162,11 @@ func resetCluster(ctx context.Context) error {
 	// Best-effort: there may be no release at all, which is the normal case.
 	// Any OTHER failure is the start of exactly the cascading two-runs-back
 	// mess this function exists to prevent, so it is printed, not swallowed.
+	// The match is helm's exact ErrReleaseNotFound text, "release: not found"
+	// -- a looser "not found" would also swallow unrelated errors that merely
+	// contain those words.
 	if out, err := exec.Command(helm.Bin(), "uninstall", releaseName, "--kube-context", kubeContext, "-n", operatorNS).CombinedOutput(); err != nil &&
-		!strings.Contains(string(out), "not found") {
+		!strings.Contains(string(out), "release: not found") {
 		fmt.Printf("uninstalling a leftover release: %v\n%s", err, out)
 	}
 

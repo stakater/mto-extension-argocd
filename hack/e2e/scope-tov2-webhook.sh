@@ -84,13 +84,26 @@ existing_expr=$(printf '%s' "${webhooks_json}" | jq -r '.webhooks[0].matchCondit
 if [ -n "${existing}" ]; then
 	if [ "${existing_expr}" = "${EXPRESSION}" ]; then
 		echo "sync-enforcement webhook already scoped by matchConditions/${existing}"
-	else
-		# Scoped by SOMETHING, so the TOV2-9 deadlock cannot happen -- but a
-		# filter that differs from the one this script carries means the
-		# operator's own changed upstream, and EXPRESSION here is stale.
+	elif printf '%s' "${existing_expr}" | grep -qF "templates.v2.stakater.com/instance"; then
+		# Scoped, and the filter still keys on the operator's instance label,
+		# so the TOV2-9 deadlock cannot happen -- but a filter that differs
+		# from the one this script carries means the operator's own changed
+		# upstream, and EXPRESSION here is stale.
 		echo "NOTE: sync-enforcement webhook is scoped by matchConditions/${existing}, but its"
 		echo "      expression differs from this script's copy. Update EXPRESSION here from"
 		echo "      template-operator-v2 config/webhook/manifests.yaml."
+	else
+		# "Scoped by SOMETHING" is not proof of safety: a matchCondition whose
+		# expression is effectively `true`, or keyed on the wrong label, still
+		# matches every UPDATE and DELETE cluster-wide with failurePolicy Fail.
+		# In a CI job a NOTE scrolls past unread, so this one fails.
+		echo "ERROR: sync-enforcement webhook is scoped by matchConditions/${existing}, but its" >&2
+		echo "       expression does not reference the templates.v2.stakater.com/instance label:" >&2
+		echo "         ${existing_expr}" >&2
+		echo "       A filter that matches more than the operator's own objects keeps the TOV2-9" >&2
+		echo "       cluster-deadlock blast radius. Update EXPRESSION here from template-operator-v2" >&2
+		echo "       config/webhook/manifests.yaml and inspect the live configuration." >&2
+		exit 1
 	fi
 	exit 0
 fi

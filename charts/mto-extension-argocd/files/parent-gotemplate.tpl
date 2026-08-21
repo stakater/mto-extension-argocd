@@ -44,13 +44,31 @@ exact inverse of what was intended.
 So the absence of accessControl.privileged.namespaces is an error here, not a
 default. MTO's own fallback is [".*"] -- deny everything -- and refusing to
 render is the closest a template can get to that.
+
+hasKey alone is not enough either: it is TRUE when the key exists holding an
+explicit null, and `| default list` then quietly turns that null into [] --
+the same fail-open, one shape over. So null is rejected alongside absence.
+
+Each level is defaulted in turn rather than dug: dig needs a map at every
+level and errors on an explicit null with a Go type-assertion message,
+instead of reaching the actionable failure below.
 */ -}}
-{{- $ic := .parameters.integrationConfig }}
-{{- $priv := dig "accessControl" "privileged" dict $ic }}
-{{- if not (hasKey $priv "namespaces") }}
-{{- fail "IntegrationConfig .spec.accessControl.privileged.namespaces is absent; refusing to render because an empty privileged list would put privileged namespaces into every tenant's destinations. Set it explicitly, to [] if the cluster genuinely has none." }}
+{{- $ic := default dict .parameters.integrationConfig }}
+{{- $ac := default dict $ic.accessControl }}
+{{- $priv := default dict $ac.privileged }}
+{{- if or (not (hasKey $priv "namespaces")) (kindIs "invalid" $priv.namespaces) }}
+{{- fail "IntegrationConfig .spec.accessControl.privileged.namespaces is absent or null; refusing to render because an empty privileged list would put privileged namespaces into every tenant's destinations. Set it explicitly, to [] if the cluster genuinely has none." }}
 {{- end }}
 {{- $privNs := $priv.namespaces | default list }}
+{{- /* An empty-string pattern is a valid empty regex that matches EVERY
+       namespace, so one stray "" would strip all destinations from every
+       tenant. mustRegexMatch does not catch it. Fail the parent (fail-closed),
+       like the absent/null guard above. ".*" is a legitimate deny-all -- kept. */ -}}
+{{- range $p := $privNs }}
+{{- if eq $p "" }}
+{{- fail "IntegrationConfig .spec.accessControl.privileged.namespaces contains an empty pattern, which matches every namespace and would strip all destinations from every tenant. Remove the empty entry (use \".*\" if you truly mean deny-all)." }}
+{{- end }}
+{{- end }}
 {{- $privGroups := $priv.groups | default list }}
 {{- range $t := .parameters.tenants }}
 {{- $name := $t.metadata.name }}
@@ -119,21 +137,32 @@ render is the closest a template can get to that.
 {{- /* Per-tenant overrides. An absent annotation inherits the chart default; an
        explicit "[]" overrides with empty. The annotation's value is passed down
        VERBATIM and parsed in the child, so malformed JSON fails one tenant
-       instead of the whole parent. */ -}}
-{{- $wlJson := dig $aWl "" $annos | default $defaultWl }}
-{{- $blJson := dig $aBl "" $annos | default $defaultBl }}
-{{- $purge := dig $aPurge "" $annos | default $defaultPurge }}
+       instead of the whole parent.
+
+       Present-or-absent is decided with hasKey, not dig-with-default: `default`
+       treats "" as unset, so an explicit empty-string annotation would silently
+       inherit the chart default -- the near-miss of the "[]" contract, on an
+       author who plainly meant to override SOMETHING. Passed through instead,
+       "" fails that one child loudly, exactly like malformed JSON.
+
+       A key present with a NIL value cannot come off a live cluster
+       (metadata.annotations is map[string]string), only from a hand-written
+       test fixture -- where `nil | quote` renders an empty parameter value
+       and the render harness fails that child loudly. */ -}}
+{{- $wlJson := $defaultWl }}{{- if hasKey $annos $aWl }}{{- $wlJson = index $annos $aWl }}{{- end }}
+{{- $blJson := $defaultBl }}{{- if hasKey $annos $aBl }}{{- $blJson = index $annos $aBl }}{{- end }}
+{{- $purge := $defaultPurge }}{{- if hasKey $annos $aPurge }}{{- $purge = index $annos $aPurge }}{{- end }}
 {{- /* sourceRepos has no shareable default: one org-wide value would let every
        tenant deploy from every other tenant's repos. The only safe shared form
        is a pattern templated on the tenant name. A pattern with no placeholder
        is simply a literal, which is why there is no separate literal option. */ -}}
-{{- $reposJson := dig $aRepos "" $annos }}
-{{- if not $reposJson }}
-{{- if $reposPattern }}
+{{- $reposJson := "" }}
+{{- if hasKey $annos $aRepos }}
+{{- $reposJson = index $annos $aRepos }}
+{{- else if $reposPattern }}
 {{- $reposJson = toJson (list (replace "{{tenant}}" $name (replace "{{ tenant }}" $name $reposPattern))) }}
 {{- else }}
 {{- $reposJson = "[]" }}
-{{- end }}
 {{- end }}
 {{- /* The `tenant-` segment is not decoration. Children used to be named
        mto-argocd-<tenant>, so a Tenant called `parent` produced

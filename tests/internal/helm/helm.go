@@ -16,15 +16,17 @@
 package helm
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 // chartRel locates the chart from a test package's directory. Go runs a test
-// binary with the working directory set to its own package, and all four suites
-// sit two levels under the repo root (tests/<suite>), so one constant serves
-// them all. A suite at another depth fails loudly with "chart not found" rather
-// than silently rendering something else.
+// binary with the working directory set to its own package, and all three
+// suites (render, admission, e2e) sit two levels under the repo root
+// (tests/<suite>), so one constant serves them all. A suite at another depth
+// fails loudly with "chart not found" rather than silently rendering
+// something else.
 const chartRel = "../../charts/mto-extension-argocd"
 
 // Bin returns the helm binary to run: $HELM when set, otherwise whatever "helm"
@@ -37,7 +39,17 @@ func Bin() string {
 	return "helm"
 }
 
-// ChartDir returns the absolute path to the chart under test.
+// ChartDir returns the absolute path to the chart under test. It stats the
+// path before returning it -- this is the boundary that knows WHY the chart
+// might be missing, so the "wrong depth" hint is attached here rather than
+// left for helm to report as a generic path error.
 func ChartDir() (string, error) {
-	return filepath.Abs(chartRel)
+	abs, err := filepath.Abs(chartRel)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", fmt.Errorf("chart not found at %s — is this suite two levels under the repo root?: %w", abs, err)
+	}
+	return abs, nil
 }

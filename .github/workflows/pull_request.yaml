@@ -5,9 +5,10 @@ on:
     branches: [main]
     # Deliberately NOT ignoring docs/**. The equivalence test reads its
     # reference data from docs/plans/spike-argocd-tov2/fixtures/ -- the captured
-    # output of the Go controller, which cannot be regenerated because ArgoCD
-    # has been removed from the cluster that produced it. Ignoring docs/ would
-    # let a change to that data skip every job.
+    # output of the Go controller, which cannot be regenerated once ArgoCD is
+    # uninstalled from the cluster that produced it (docs/live-deployment.md
+    # records it still running there for now). Ignoring docs/ would let a
+    # change to that data skip every job.
     paths-ignore:
       - '*.md'
       - 'examples/**'
@@ -25,15 +26,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.16.3
       # One step, calling the same aggregate target a developer runs locally.
       # This used to be three steps naming the individual targets, which meant
       # `make test` and CI were two hand-maintained lists of the same thing: a
       # target added to one would silently not run in the other, and CI would
       # stay green with the coverage simply absent. Each sub-target still echoes
       # its own command, so a failed run still says which one broke.
+      #
+      # No HELM override, matching push.yaml: the Makefile installs its own
+      # pinned helm into bin/. This step used to install helm via azure/setup-helm
+      # and pass HELM=helm, which collided with the .PHONY helm target, still
+      # downloaded the pinned binary, and then linted with whatever was on PATH.
       #
       # What it covers:
       #   helm-lint         the chart lints strict
@@ -44,4 +47,4 @@ jobs:
       #                     CRDs accepts what the chart renders -- structural
       #                     schema plus CEL rules. No cluster required.
       - name: Lint, vet and test
-        run: HELM=helm make test
+        run: make test

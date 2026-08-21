@@ -365,12 +365,13 @@ it has to.
 
 ### Why this chart cares
 
-`values.yaml` tells operators that `sync.mode: strict` has a bounded blast
-radius: "the webhook carries a matchConditions CEL filter ... so the API server
-never consults it for anything else." True of the published chart, false of the
-checked-in one, and the difference is not degraded drift protection but a dead
-cluster. `values.yaml` now carries the one-line check rather than the bare
-claim.
+`values.yaml` originally told operators that `sync.mode: strict` has a bounded
+blast radius: "the webhook carries a matchConditions CEL filter ... so the API
+server never consults it for anything else." True of the published chart, false
+of the checked-in one, and the difference is not degraded drift protection but
+a dead cluster. That wording is gone: `values.yaml` now says the blast radius
+holds "ONLY IF that webhook carries its matchConditions CEL filter", and
+carries the one-line check to run rather than the bare claim.
 
 ### Suggested fix
 

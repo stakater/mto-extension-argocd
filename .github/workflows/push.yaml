@@ -20,7 +20,11 @@ on:
 jobs:
   push-chart:
     name: Push Chart
-    if: "! contains(toJSON(github.event.commits.*.message), '[skip-ci]')"
+    # No [skip-ci] escape hatch: a release job must not be skippable by
+    # commit-message convention. One [skip-ci] commit in a merged batch would
+    # skip the whole publish -- version bumped, nothing shipped, and the Slack
+    # step below only fires on failure(), so nobody would be told. Docs-only
+    # pushes are already excluded by paths-ignore above.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,9 +50,13 @@ jobs:
       # A red main here means the chart did not ship -- either the tests broke
       # or the version was not bumped. Same channel the other extension repos
       # notify.
+      #
+      # Pinned by SHA, not tag: this job carries GHCR_TOKEN and the Slack
+      # webhook, and a third-party tag can be moved to arbitrary code after
+      # review.
       - name: Notify on failure
         if: failure()
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: slackapi/slack-github-action@37ebaef184d7626c5f204ab8d3baff4262dd30f0 # v1.27.0
         with:
           payload: |
             {

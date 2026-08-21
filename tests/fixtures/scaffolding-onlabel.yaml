@@ -1,12 +1,19 @@
 # The OnLabel branch of the scaffolding filter, and what a near-miss marker
 # value does.
 #
-# Only `opted-in` appears in the golden. The other three prove:
+# The label key is CUSTOM here (platform.acme.example/argocd), deliberately:
+# this is the one gotemplate-read key no other fixture varies, so a parent
+# that hardcoded the default label key instead of reading its parameter would
+# otherwise pass the whole suite.
+#
+# Only `opted-in` appears in the golden. The other four prove:
 #
 #   near-miss-True  "True" is not "true", so the tenant is NOT scaffolded.
 #   near-miss-yes   nor is "yes".
 #   annotated-only  in OnLabel mode the annotation is inert -- the two maps are
 #                   selected by scaffolding.mode, never OR'd.
+#   default-key     opted in under the DEFAULT label key; with a custom key
+#                   configured it must NOT be scaffolded.
 #
 # A near-miss cannot be made to fail loudly here, and that is a deliberate
 # limitation rather than an oversight: this marker decides whether a child is
@@ -23,6 +30,8 @@ values:
     namespace: openshift-gitops
   scaffolding:
     mode: OnLabel
+    labels:
+      enabled: platform.acme.example/argocd
 
 cluster:
   integrationConfig:
@@ -35,24 +44,35 @@ cluster:
     - metadata:
         name: opted-in
         labels:
-          argocd.tenantoperator.stakater.com/enabled: "true"
+          platform.acme.example/argocd: "true"
       spec: {}
 
     - metadata:
         name: near-miss-True
         labels:
-          argocd.tenantoperator.stakater.com/enabled: "True"
+          platform.acme.example/argocd: "True"
       spec: {}
 
     - metadata:
         name: near-miss-yes
         labels:
-          argocd.tenantoperator.stakater.com/enabled: "yes"
+          platform.acme.example/argocd: "yes"
       spec: {}
 
     - metadata:
         name: annotated-only
         annotations:
+          # The configured ANNOTATION key (default), which would match in
+          # OnAnnotation mode -- inert here because mode selects the map.
+          argocd.tenantoperator.stakater.com/enabled: "true"
+          # And the custom LABEL key as an annotation: the right key in the
+          # wrong map must not match either.
+          platform.acme.example/argocd: "true"
+      spec: {}
+
+    - metadata:
+        name: default-key
+        labels:
           argocd.tenantoperator.stakater.com/enabled: "true"
       spec: {}
 
@@ -61,3 +81,4 @@ cluster:
     - metadata: { name: near-miss-True-dev, labels: { stakater.com/tenant: near-miss-True } }
     - metadata: { name: near-miss-yes-dev, labels: { stakater.com/tenant: near-miss-yes } }
     - metadata: { name: annotated-only-dev, labels: { stakater.com/tenant: annotated-only } }
+    - metadata: { name: default-key-dev, labels: { stakater.com/tenant: default-key } }

@@ -17,6 +17,10 @@
 > | a blank `argocd.namespace` renders zero children | it renders one per tenant, each of which then fails |
 > | the IntegrationConfig read is fail-closed as written | it failed OPEN until fixed; absence is now an error |
 >
+> The migration deliverables this plan names — `MIGRATION.md`,
+> `hack/mto-argocd-migrate`, `tests/migrate` — moved to a follow-up PR and do
+> not exist in this repository yet.
+>
 > Live behaviour is in [../live-deployment.md](../live-deployment.md); upstream
 > defects are in [../upstream-issues.md](../upstream-issues.md).
 

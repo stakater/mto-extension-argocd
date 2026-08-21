@@ -1,7 +1,10 @@
 package render
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +35,11 @@ func ChartDir(t *testing.T) string {
 // HelmTemplate renders the chart. It returns the error rather than failing the
 // test, because several tests assert that a render is REFUSED -- the schema
 // guard on argocd.namespace in particular.
-func HelmTemplate(t *testing.T, valuesYAML string, sets map[string]string) (string, error) {
+//
+// extraArgs go to helm verbatim; the one caller today passes
+// --skip-schema-validation, to prove the _helpers.tpl guards hold on the
+// render paths values.schema.json never sees.
+func HelmTemplate(t *testing.T, valuesYAML string, sets map[string]string, extraArgs ...string) (string, error) {
 	t.Helper()
 	args := []string{"template", "argocd", ChartDir(t)}
 	if valuesYAML != "" {
@@ -45,6 +52,7 @@ func HelmTemplate(t *testing.T, valuesYAML string, sets map[string]string) (stri
 	for k, v := range sets {
 		args = append(args, "--set", fmt.Sprintf("%s=%s", k, v))
 	}
+	args = append(args, extraArgs...)
 	out, err := exec.Command(helm.Bin(), args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("helm template: %w: %s", err, out)
@@ -66,16 +74,25 @@ func MustHelmTemplate(t *testing.T, valuesYAML string, sets map[string]string) [
 	return docs
 }
 
-// Find returns the single object of the given kind and name.
+// Find returns the single object of the given kind and name. Uniqueness is
+// enforced, not assumed: a chart bug that renders a duplicate Template is
+// exactly the class this harness exists to catch, and first-match-wins would
+// mask it.
 func Find(t *testing.T, docs []map[string]any, kind, name string) map[string]any {
 	t.Helper()
+	var found map[string]any
 	for _, d := range docs {
 		if d["kind"] == kind && meta(d)["name"] == name {
-			return d
+			if found != nil {
+				t.Fatalf("more than one %s/%s in rendered chart", kind, name)
+			}
+			found = d
 		}
 	}
-	t.Fatalf("no %s/%s in rendered chart", kind, name)
-	return nil
+	if found == nil {
+		t.Fatalf("no %s/%s in rendered chart", kind, name)
+	}
+	return found
 }
 
 func meta(obj map[string]any) map[string]any {
@@ -103,13 +120,16 @@ func marshalValues(v map[string]any) (string, error) {
 // paramMap turns a spec.parameters array into the name -> value map a
 // gotemplate sees. Parameters declared without a value come through as nil,
 // which is what the objectFieldRef ones do until the fixture supplies them.
-func paramMap(obj map[string]any) map[string]any {
+// A non-map entry is chart corruption, not something to skip over: a harness
+// whose whole point is fidelity must not quietly drop part of its input.
+func paramMap(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
 	out := map[string]any{}
 	list, _ := spec(obj)["parameters"].([]any)
 	for _, p := range list {
 		pm, ok := p.(map[string]any)
 		if !ok {
-			continue
+			t.Fatalf("spec.parameters entry %v is a %T, not a mapping", p, p)
 		}
 		name, _ := pm["name"].(string)
 		out[name] = pm["value"]
@@ -158,15 +178,31 @@ func FixtureNames(t *testing.T) []string {
 }
 
 // LoadFixture reads tests/fixtures/<name>.yaml.
+//
+// Decoding is strict (KnownFields): a lenient decode turns a typo'd top-level
+// key -- `expectChildError:`, a misspelt `cluster:` -- into a zero field with
+// no error, and the failure then surfaces downstream as a confusing "child
+// failed unexpectedly" or a parent render error instead of naming the typo at
+// its source. Strictness stops at the Values/Cluster maps, which hold
+// arbitrary chart values and cluster state by design.
 func LoadFixture(t *testing.T, name string) Fixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "fixtures", name+".yaml"))
 	if err != nil {
 		t.Fatalf("reading fixture %s: %v", name, err)
 	}
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
 	var f Fixture
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	if err := dec.Decode(&f); err != nil {
 		t.Fatalf("parsing fixture %s: %v", name, err)
+	}
+	// A single Decode reads one YAML document; a stray `---` mid-file would
+	// silently discard everything after it -- the same silent-drop class the
+	// strict decode exists to catch.
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		t.Fatalf("fixture %s holds more than one YAML document; everything after the first `---` would be silently ignored", name)
 	}
 	return f
 }
@@ -217,11 +253,14 @@ func TwoStage(t *testing.T, f Fixture) (appProjects string, childErrs map[string
 	child := Find(t, docs, "Template", childTemplateName)
 
 	// -- stage 1
-	parentParams := paramMap(parent)
+	parentParams := paramMap(t, parent)
 	for k, v := range f.Cluster {
 		parentParams[k] = v
 	}
 	parentGotmpl, _ := spec(parent)["gotemplate"].(string)
+	if parentGotmpl == "" {
+		t.Fatal("parent Template has no gotemplate; the chart's render mechanism changed under this harness")
+	}
 	parentNS, _ := meta(parent)["namespace"].(string)
 	rendered, err := Gotemplate(parentGotmpl, parentParams, Instance{
 		Name: parentTemplateName, Namespace: parentNS,
@@ -236,12 +275,15 @@ func TwoStage(t *testing.T, f Fixture) (appProjects string, childErrs map[string
 
 	// -- stage 2
 	childGotmpl, _ := spec(child)["gotemplate"].(string)
+	if childGotmpl == "" {
+		t.Fatal("child Template has no gotemplate; the chart's render mechanism changed under this harness")
+	}
 	childErrs = map[string]error{}
 	var out []string
 	for _, ti := range children {
 		name, _ := meta(ti)["name"].(string)
-		params := paramMap(child)
-		for k, v := range paramMap(ti) {
+		params := paramMap(t, child)
+		for k, v := range paramMap(t, ti) {
 			params[k] = v
 		}
 		ns, _ := meta(ti)["namespace"].(string)

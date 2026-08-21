@@ -24,7 +24,15 @@ concurrency:
 jobs:
   verify-label:
     name: Verify Label
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved' || github.event.label.name == 'ok-to-test/kubernetes' }}
+    # The approval path checks WHO approved: an approval-triggered run executes
+    # PR-authored code (Makefile, hack/e2e scripts, Go tests) via the merge
+    # ref, and on a public repo any account can submit an approving review.
+    # The gate limits that to OWNER/MEMBER/COLLABORATOR associations -- not a
+    # guarantee of write access (MEMBER is org membership, COLLABORATOR
+    # includes read/triage grants), but it excludes drive-by accounts, which
+    # is the attack this closes. The other two triggers carry their own bars:
+    # applying the label needs triage on this repo, a dispatch needs write.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) || github.event.label.name == 'ok-to-test/kubernetes' }}
     runs-on: ubuntu-latest
     # Stated rather than inherited: removing a label needs write, and a repo
     # whose default token is read-only would otherwise fail this step at the
@@ -39,10 +47,13 @@ jobs:
       # permissions block above, so this step 403s there. That must not gate
       # the suite -- for a fork the label stays on and can re-trigger, which is
       # the lesser evil against "a fork can never run this at all".
+      #
+      # Pinned by SHA, not tag: this job holds pull-requests: write, and a
+      # third-party tag can be moved to arbitrary code after review.
       - name: Remove the test label
         if: ${{ github.event.label.name == 'ok-to-test/kubernetes' }}
         continue-on-error: true
-        uses: actions-ecosystem/action-remove-labels@v1
+        uses: actions-ecosystem/action-remove-labels@2ce5d41b4b6aa8503e285553f75ed56e0a40bae0 # v1
         with:
           labels: ok-to-test/kubernetes
 

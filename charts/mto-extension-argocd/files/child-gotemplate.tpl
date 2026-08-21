@@ -39,6 +39,18 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $priv := mustFromJson .parameters.privilegedGroupsJson }}
 {{- $tg := mustFromJson .parameters.tenantGroupsJson }}
 {{- $tu := mustFromJson .parameters.tenantUsersJson }}
+{{- /* mustFromJson validates JSON syntax, not shape. A wrong-typed value like
+       [{"group":{}}] or ["a",123] would stringify via quote ("map[]", "123")
+       and apply cleanly to the live object -- silent corruption. Reject a
+       present-but-non-string group/kind or repo here so it fails this one child
+       instead. An absent group/kind is nil and renders "" (core group) -- kept. */ -}}
+{{- range $i := concat $wl $bl }}
+{{- if and (hasKey $i "group") (not (kindIs "string" $i.group)) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf $i.group) $i.group) }}{{- end }}
+{{- if and (hasKey $i "kind") (not (kindIs "string" $i.kind)) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf $i.kind) $i.kind) }}{{- end }}
+{{- end }}
+{{- range $r := $repos }}
+{{- if not (kindIs "string" $r) }}{{- fail (printf "sourceRepos entries must be strings, got %s (%v)" (kindOf $r) $r) }}{{- end }}
+{{- end }}
 {{- /* Reject a near-miss on the purge annotation instead of reading it as
        "retain". "True", "yes", "1" and "on" all look affirmative and would
        silently mean the opposite of what the author intended -- and this one
@@ -52,8 +64,8 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: {{ $t }}
-  namespace: {{ $argoNs }}
+  name: {{ $t | quote }}
+  namespace: {{ $argoNs | quote }}
   {{- if not $purge }}
   annotations:
     templates.v2.stakater.com/deletion-policy: Orphan
@@ -68,7 +80,7 @@ spec:
   {{- end }}
   destinations:
   {{- range $ns := $nsList }}
-    - namespace: {{ $ns }}
+    - namespace: {{ $ns | quote }}
       server: https://kubernetes.default.svc
   {{- end }}
   {{- /* The ArgoCD namespace is always a destination, even when it matches a
@@ -78,7 +90,7 @@ spec:
          the tenant label and is not privileged, the parent already put it in
          namespacesJson. */}}
   {{- if not (has $argoNs $nsList) }}
-    - namespace: {{ $argoNs }}
+    - namespace: {{ $argoNs | quote }}
       server: https://kubernetes.default.svc
   {{- end }}
   {{- if $wl }}
@@ -100,12 +112,12 @@ spec:
   {{- /* Go's hex(sha256("<tenant>-<role>"))[:6]. Reproduced exactly by sprig. */}}
   {{- $hash := sha256sum (printf "%s-%s" $t $role) | trunc 6 }}
   {{- $verb := ternary "get" "*" (eq $role "view") }}
-    - name: {{ $t }}-{{ $role }}
+    - name: {{ printf "%s-%s" $t $role | quote }}
       description: >-
         Role that gives {{ if eq $role "owner" }}full{{ else }}{{ $role }}{{ end }} access to all
         resources inside the tenant's namespace to the tenant owner group
       policies:
-        - "p, proj:{{ $t }}:{{ $t }}-{{ $role }}, *, {{ $verb }}, {{ $t }}/*, allow"
+        - {{ printf "p, proj:%s:%s-%s, *, %s, %s/*, allow" $t $t $role $verb $t | quote }}
       {{- /* Order is load-bearing for the equivalence diff: generated group,
              then the IntegrationConfig's privileged groups, then the tenant's
              own groups, then its users.

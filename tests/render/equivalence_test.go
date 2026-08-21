@@ -10,14 +10,18 @@ import (
 	"testing"
 )
 
-// D3 -- cross-implementation equivalence.
+const spikeFixtures = "../../docs/plans/spike-argocd-tov2/fixtures"
+
+// TestEquivalenceWithExtensionsController is D3 -- cross-implementation
+// equivalence. (Scenario tags like D3 refer to
+// docs/plans/TASKS-argocd-extension.md.)
 //
 // Every other test in this package asserts the chart against itself. This one
 // asserts it against the thing it replaces: golden-appproject-pe.json is
 // AppProject/pe as produced by ExtensionsArgoCDReconciler on a live OpenShift
 // cluster, captured alongside the exact Tenant, Namespace set and
-// IntegrationConfig that produced it. It cannot be regenerated -- ArgoCD has
-// since been removed from that cluster -- which is why it lives in git.
+// IntegrationConfig that produced it. It cannot be regenerated once ArgoCD is
+// removed from that cluster -- which is why it lives in git.
 //
 // The diff must be empty except for two deltas, and both are asserted
 // explicitly rather than tolerated:
@@ -33,8 +37,6 @@ import (
 // It also pins that the two resource lists are seeded into chart values from
 // the IntegrationConfig's deprecated .spec.integrations.argocd, and the diff is
 // only empty because that seeding is faithful.
-const spikeFixtures = "../../docs/plans/spike-argocd-tov2/fixtures"
-
 func TestEquivalenceWithExtensionsController(t *testing.T) {
 	tenant := readJSON(t, "input-tenant-pe.json")
 	ic := readJSON(t, "input-integrationconfig.json")
@@ -116,6 +118,13 @@ func TestEquivalenceWithExtensionsController(t *testing.T) {
 
 	t.Run("roles differ only by the tenant's users", func(t *testing.T) {
 		usersByRole := tenantUsersByRole(t, tenant)
+		// The whole subtest exists to prove the users delta. If the fixture's
+		// shape drifted and the lookup quietly decoded to empty, expect and
+		// got would BOTH have no users and the assertion would pass while
+		// testing nothing -- the `pe` fixture has one owner user, so demand it.
+		if len(usersByRole["owner"]) == 0 {
+			t.Fatal("fixture drift: input-tenant-pe.json should carry at least one owner user; the users delta below would be vacuously empty")
+		}
 		wantRoles := rolesByName(t, wantSpec)
 		gotRoles := rolesByName(t, gotSpec)
 

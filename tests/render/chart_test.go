@@ -1,6 +1,8 @@
 package render
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -8,16 +10,138 @@ import (
 // A blank argocd.namespace does not render zero children -- it renders one per
 // tenant, each emitting an AppProject with an empty namespace that the API
 // server rejects, so every tenant breaks at once. The values.schema.json
-// minLength is the only thing between a typo and that outcome.
+// minLength catches it at install time; TestTemplateGuardsHoldWithoutSchema
+// covers the render paths that skip the schema.
 func TestSchemaRefusesBlankArgoNamespace(t *testing.T) {
-	if _, err := HelmTemplate(t, "", nil); err == nil {
+	_, err := HelmTemplate(t, "", nil)
+	if err == nil {
 		t.Fatal("blank argocd.namespace rendered; it must be refused")
+	}
+	if !strings.Contains(err.Error(), "namespace") {
+		t.Errorf("refusal should name the namespace field, got: %v", err)
+	}
+}
+
+// Every fail-safe _helpers.tpl re-implements exists because values.schema.json
+// is skippable (helm >= 3.16 --skip-schema-validation, and Helm SDK render
+// paths that never apply it). So each guard is exercised here WITHOUT the
+// schema in front of it: in every other test the schema masks the guard, and
+// deleting an include from the parent template would leave the whole suite
+// green while the skip-schema path ships the misconfiguration.
+func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
+	cases := []struct {
+		name    string
+		sets    map[string]string
+		json    map[string]string // applied via --set-json, for null and structured shapes
+		wantErr string
+	}{
+		// A typo'd mode emits zero children and orphan reaping then deletes
+		// every AppProject the release manages -- the fleet-delete path.
+		{name: "invalid scaffolding.mode",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "scaffolding.mode": "Wrong"},
+			wantErr: "must be one of Always, OnLabel, OnAnnotation, Never"},
+		{name: "invalid sync.mode",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "sync.mode": "bogus"},
+			wantErr: "must be one of off, revert, strict"},
+		// sync stripped entirely: the helper must refuse a missing mode, not
+		// quietly fall back -- an earlier draft defaulted to "revert" here,
+		// silently contradicting the shipped strict default on exactly this
+		// path. Reintroducing any fallback turns this row red.
+		{name: "missing sync.mode",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"sync": "null"},
+			wantErr: "must be one of off, revert, strict"},
+		{name: "blank argocd.namespace",
+			sets:    map[string]string{},
+			wantErr: "argocd.namespace is required"},
+		// The whole section null, not just the field blank. NOTES.txt used to
+		// nil-pointer before this guard could speak.
+		{name: "null argocd",
+			json:    map[string]string{"argocd": "null"},
+			wantErr: "argocd.namespace is required"},
+		{name: "null scaffolding",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"scaffolding": "null"},
+			wantErr: "must be a non-empty annotation key"},
+		{name: "unrecognised sourceRepos placeholder",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceRepos.pattern": "https://github.com/acme/${tenant}-gitops"},
+			wantErr: "unrecognised placeholder"},
+		{name: "empty scaffolding annotation key",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "scaffolding.annotations.enabled": ""},
+			wantErr: "scaffolding.annotations.enabled must be a non-empty annotation key"},
+		{name: "empty scaffolding label key",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "scaffolding.labels.enabled": ""},
+			wantErr: "scaffolding.labels.enabled must be a non-empty label key"},
+		{name: "empty tenantNamespaceLabel",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "tenantNamespaceLabel": ""},
+			wantErr: "tenantNamespaceLabel must be a non-empty label key"},
+		// null renders "<nil>" into every child's on-delete-purge parameter:
+		// fleet-wide failure blamed on tenant annotations. The schema's
+		// required marker catches it there; this is the skip-schema twin.
+		{name: "null onDeletePurgeAppProject",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"onDeletePurgeAppProject": "null"},
+			wantErr: "onDeletePurgeAppProject must be true or false"},
+		// A scalar here renders defaultWhitelistJson as a JSON string and every
+		// child then dies on-cluster with a range type error.
+		{name: "non-list clusterResourceWhitelist",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","clusterResourceWhitelist":"oops"}`},
+			wantErr: "argocd.clusterResourceWhitelist must be a list"},
+		// A malformed namespace name passes minLength but the API server rejects
+		// every rendered AppProject on cluster, late. Space + uppercase here.
+		{name: "malformed argocd.namespace",
+			sets:    map[string]string{"argocd.namespace": "Argo CD"},
+			wantErr: "not a valid namespace name"},
+		// An invalid label key is the quietest misconfiguration: hasKey/dig never
+		// match it, so the override or opt-in it names is silently ignored.
+		{name: "malformed tenantNamespaceLabel",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "tenantNamespaceLabel": "not a label key!!"},
+			wantErr: "not a valid Kubernetes label"},
+		// The override keys and the opt-in key share the Tenant annotation map;
+		// a duplicate makes the opt-in marker and an override read each other.
+		{name: "colliding annotation keys",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "annotations.onDeletePurge": "argocd.tenantoperator.stakater.com/enabled"},
+			wantErr: "annotation keys collide"},
+	}
+	// An empty override key never matches any annotation, so the override --
+	// including on-delete-purge -- is silently ignored and the chart default
+	// silently wins. Nothing would ever error. All four keys, so dropping one
+	// from the validateOverrideKeys range list is caught.
+	for _, key := range []string{"sourceRepos", "clusterResourceWhitelist", "namespaceResourceBlacklist", "onDeletePurge"} {
+		cases = append(cases, struct {
+			name    string
+			sets    map[string]string
+			json    map[string]string
+			wantErr string
+		}{
+			name:    "empty override annotation key " + key,
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "annotations." + key: ""},
+			wantErr: "annotations." + key + " must be a non-empty annotation key",
+		})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := []string{"--skip-schema-validation"}
+			for k, v := range tc.json {
+				extra = append(extra, "--set-json", k+"="+v)
+			}
+			_, err := HelmTemplate(t, "", tc.sets, extra...)
+			if err == nil {
+				t.Fatal("rendered without the schema; the _helpers.tpl guard must refuse this on its own")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
 // The reap verbs must be granted regardless of scaffolding.mode, and only
 // `create` may be gated. Gating the whole block leaves the TemplateInstance
-// finalizer unable to delete what it owns, and teardown blocks forever.
+// finalizer unable to delete what it owns, and teardown blocks forever. The
+// same split exists twice: the ClusterRole for AppProjects, and the namespaced
+// Role for the child TemplateInstances -- gating either whole block reproduces
+// the identical deadlock one resource over.
 func TestRBACReapVerbsSurviveModeNever(t *testing.T) {
 	for _, mode := range []string{"Always", "Never"} {
 		t.Run(mode, func(t *testing.T) {
@@ -25,17 +149,194 @@ func TestRBACReapVerbsSurviveModeNever(t *testing.T) {
 				"argocd.namespace": "openshift-gitops",
 				"scaffolding.mode": mode,
 			})
-			verbs := clusterRoleVerbs(t, docs, writeClusterRoleName(t, docs), "argoproj.io", "appprojects")
+			for _, target := range []struct {
+				kind, name, apiGroup, resource string
+			}{
+				{"ClusterRole", writeClusterRoleName(t, docs), "argoproj.io", "appprojects"},
+				{"Role", "mto-extension-argocd-children", "templates.v2.stakater.com", "templateinstances"},
+			} {
+				verbs := roleVerbs(t, docs, target.kind, target.name, target.apiGroup, target.resource)
 
-			for _, v := range []string{"get", "update", "patch", "delete"} {
-				if !verbs[v] {
-					t.Errorf("mode=%s does not grant reap verb %q", mode, v)
+				for _, v := range []string{"get", "update", "patch", "delete"} {
+					if !verbs[v] {
+						t.Errorf("mode=%s: %s %s does not grant reap verb %q", mode, target.kind, target.name, v)
+					}
+				}
+				if want := mode != "Never"; verbs["create"] != want {
+					t.Errorf("mode=%s: %s %s create granted=%v, want %v", mode, target.kind, target.name, verbs["create"], want)
 				}
 			}
-			if want := mode != "Never"; verbs["create"] != want {
-				t.Errorf("mode=%s: create granted=%v, want %v", mode, verbs["create"], want)
-			}
 		})
+	}
+}
+
+// Never is the documented kill switch: zero children, and orphan reaping then
+// removes what the release managed. If a restructured filter ever defaulted to
+// "take", Never would silently scaffold everything -- the inverse of a kill
+// switch. Only the on-demand e2e lane covered this before; this pins it on
+// every PR.
+func TestModeNeverEmitsZeroChildren(t *testing.T) {
+	rendered, childErrs := TwoStage(t, Fixture{
+		Values: map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd"},
+			"scaffolding": map[string]any{"mode": "Never"},
+		},
+		Cluster: map[string]any{
+			"tenants": []any{
+				// Opted in under both keys, so Never must win over any opt-in.
+				map[string]any{"metadata": map[string]any{
+					"name":        "opted-in",
+					"annotations": map[string]any{"argocd.tenantoperator.stakater.com/enabled": "true"},
+					"labels":      map[string]any{"argocd.tenantoperator.stakater.com/enabled": "true"},
+				}, "spec": map[string]any{}},
+				map[string]any{"metadata": map[string]any{"name": "plain"}, "spec": map[string]any{}},
+			},
+			"namespaces": []any{},
+			"integrationConfig": map[string]any{
+				"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{}, "groups": []any{}}},
+			},
+		},
+	})
+	if len(childErrs) != 0 {
+		t.Fatalf("children failed under mode=Never: %v", childErrs)
+	}
+	docs, err := Documents(rendered)
+	if err != nil {
+		t.Fatalf("decoding render: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("mode=Never emitted %d AppProjects, want 0: the kill switch scaffolds", len(docs))
+	}
+}
+
+// `off` must emit no sync block at all -- not `mode: off` -- so the CRD
+// default applies. The admission suite only proves an off-render is ACCEPTED,
+// which a wrong `mode: revert` block would be too.
+func TestSyncModeOffEmitsNoSyncBlock(t *testing.T) {
+	docs := MustHelmTemplate(t, "sync:\n  mode: \"off\"\n", map[string]string{
+		"argocd.namespace": "openshift-gitops",
+	})
+	for _, name := range []string{parentTemplateName, childTemplateName} {
+		tmpl := Find(t, docs, "Template", name)
+		if sync, ok := spec(tmpl)["sync"]; ok {
+			t.Errorf("%s carries a sync block under mode=off (%v); nothing should be emitted so the CRD default applies", name, sync)
+		}
+	}
+}
+
+// rbac.create=false is for clusters that bind the grants themselves. It must
+// remove every RBAC object and nothing else -- the three template-operator-v2
+// objects are the chart's whole mechanism and must survive.
+func TestRBACCreateFalseOmitsAllRBAC(t *testing.T) {
+	docs := MustHelmTemplate(t, "", map[string]string{
+		"argocd.namespace": "openshift-gitops",
+		"rbac.create":      "false",
+	})
+	for _, d := range docs {
+		kind, _ := d["kind"].(string)
+		switch kind {
+		case "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding":
+			t.Errorf("rbac.create=false still renders %s/%v", kind, meta(d)["name"])
+		}
+	}
+	Find(t, docs, "Template", parentTemplateName)
+	Find(t, docs, "Template", childTemplateName)
+	Find(t, docs, "TemplateInstance", parentTemplateName)
+}
+
+// Every RBAC object must OUTLIVE the release on teardown, or the operator's
+// finalizers deadlock the whole release in Terminating (TOV2-5). Helm and
+// ArgoCD honour different annotations, so both must be present -- dropping
+// either silently brings the deadlock back on one of the two teardown paths.
+func TestRBACIsRetainedOnTeardown(t *testing.T) {
+	docs := MustHelmTemplate(t, "", map[string]string{"argocd.namespace": "openshift-gitops"})
+
+	var rbac int
+	for _, d := range docs {
+		kind, _ := d["kind"].(string)
+		switch kind {
+		case "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding":
+		default:
+			continue
+		}
+		rbac++
+		name, _ := meta(d)["name"].(string)
+		annos, _ := meta(d)["annotations"].(map[string]any)
+		if got, _ := annos["helm.sh/resource-policy"].(string); got != "keep" {
+			t.Errorf("%s/%s: helm.sh/resource-policy = %q, want keep (helm uninstall would delete it and deadlock the finalizers)", kind, name, got)
+		}
+		// Prune=false survives a sync drop, Delete=false a cascade app delete;
+		// resource-policy is Helm-only, so this is not redundant.
+		got, _ := annos["argocd.argoproj.io/sync-options"].(string)
+		if !strings.Contains(got, "Prune=false") || !strings.Contains(got, "Delete=false") {
+			t.Errorf("%s/%s: argocd.argoproj.io/sync-options = %q, want both Prune=false and Delete=false", kind, name, got)
+		}
+	}
+	// Guard against the block vanishing and the test passing vacuously.
+	if rbac == 0 {
+		t.Fatal("no RBAC objects rendered; the retention assertions never ran")
+	}
+}
+
+// The parent's objectFieldRefs pin apiVersions (Tenant v1beta3,
+// IntegrationConfig v1beta1). Whether those versions are actually SERVED was
+// otherwise checked only by the on-demand e2e lane -- and the
+// v1beta1-vs-v1beta3 storage-version trap was real (see tests/e2e). The CRDs
+// vendored for the admission suite are the same ones the kind lane installs,
+// so pin the reference against them on every PR.
+func TestParentObjectFieldRefVersionsAreServed(t *testing.T) {
+	docs := MustHelmTemplate(t, "", map[string]string{"argocd.namespace": "openshift-gitops"})
+	ti := Find(t, docs, "TemplateInstance", parentTemplateName)
+
+	crdFiles, err := filepath.Glob(filepath.Join("..", "crds", "*.yaml"))
+	if err != nil || len(crdFiles) == 0 {
+		t.Fatalf("no CRDs found in tests/crds: %v", err)
+	}
+	served := map[string]bool{} // "group/version/Kind" -> served
+	for _, f := range crdFiles {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("reading %s: %v", f, err)
+		}
+		crds, err := Documents(string(raw))
+		if err != nil {
+			t.Fatalf("decoding %s: %v", f, err)
+		}
+		for _, crd := range crds {
+			sp := spec(crd)
+			group, _ := sp["group"].(string)
+			names, _ := sp["names"].(map[string]any)
+			kind, _ := names["kind"].(string)
+			versions, _ := sp["versions"].([]any)
+			for _, v := range versions {
+				vm, _ := v.(map[string]any)
+				if s, _ := vm["served"].(bool); !s {
+					continue
+				}
+				version, _ := vm["name"].(string)
+				served[group+"/"+version+"/"+kind] = true
+			}
+		}
+	}
+
+	params, _ := spec(ti)["parameters"].([]any)
+	checked := 0
+	for _, p := range params {
+		pm, _ := p.(map[string]any)
+		vf, _ := pm["valueFrom"].(map[string]any)
+		ref, _ := vf["objectFieldRef"].(map[string]any)
+		apiVersion, _ := ref["apiVersion"].(string)
+		kind, _ := ref["kind"].(string)
+		if apiVersion == "" || !strings.Contains(apiVersion, "/") {
+			continue // core-group Namespace has no CRD to check against
+		}
+		checked++
+		if !served[apiVersion+"/"+kind] {
+			t.Errorf("parameter %v references %s %s, which no CRD in tests/crds serves", pm["name"], apiVersion, kind)
+		}
+	}
+	if checked != 2 {
+		t.Errorf("expected to check 2 CRD-backed objectFieldRefs (Tenant, IntegrationConfig), checked %d", checked)
 	}
 }
 
@@ -145,6 +446,12 @@ func TestSourceReposPatternRejectsUnknownPlaceholder(t *testing.T) {
 		{"https://github.com/acme/{{ .tenant }}-gitops", false},
 		{"https://github.com/acme/{{ .Tenant }}-gitops", false},
 		{"https://github.com/acme/{{ tenantName }}-gitops", false},
+		// Brace-free placeholder syntaxes ship just as silently: an earlier
+		// validator only looked for leftover "{{", so ${tenant} -- which the
+		// helper's own comment listed as caught -- sailed straight through.
+		{"https://github.com/acme/${tenant}-gitops", false},
+		{"https://github.com/acme/$(tenant)-gitops", false},
+		{"https://github.com/acme/%s-gitops", false},
 	} {
 		t.Run(tc.pattern, func(t *testing.T) {
 			_, err := HelmTemplate(t, "", map[string]string{
@@ -227,12 +534,13 @@ func writeClusterRoleName(t *testing.T, docs []map[string]any) string {
 	return ""
 }
 
-// clusterRoleVerbs collects the verbs granted on ONE apiGroup/resource pair.
-// Scoping matters: merging verbs across every rule would let a `create` granted
-// on some unrelated resource satisfy a check about appprojects.
-func clusterRoleVerbs(t *testing.T, docs []map[string]any, name, apiGroup, resource string) map[string]bool {
+// roleVerbs collects the verbs a Role or ClusterRole grants on ONE
+// apiGroup/resource pair. Scoping matters: merging verbs across every rule
+// would let a `create` granted on some unrelated resource satisfy a check
+// about appprojects.
+func roleVerbs(t *testing.T, docs []map[string]any, kind, name, apiGroup, resource string) map[string]bool {
 	t.Helper()
-	cr := Find(t, docs, "ClusterRole", name)
+	cr := Find(t, docs, kind, name)
 	out := map[string]bool{}
 	rules, _ := cr["rules"].([]any)
 	for _, r := range rules {
@@ -248,7 +556,7 @@ func clusterRoleVerbs(t *testing.T, docs []map[string]any, name, apiGroup, resou
 		}
 	}
 	if len(out) == 0 {
-		t.Fatalf("ClusterRole %s grants nothing on %s/%s", name, apiGroup, resource)
+		t.Fatalf("%s %s grants nothing on %s/%s", kind, name, apiGroup, resource)
 	}
 	return out
 }

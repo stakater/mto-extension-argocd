@@ -87,6 +87,12 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 					t.Errorf("%s: %d roles, want 3", name, len(roles))
 				}
 				for i, r := range roles {
+					if i >= 3 {
+						// Already reported by the count check above; indexing
+						// the suffix table past it would panic the binary
+						// instead of failing the test.
+						break
+					}
 					rm, _ := r.(map[string]any)
 					suffix := []string{"owner", "edit", "view"}[i]
 					if want := name + "-" + suffix; rm["name"] != want {
@@ -130,7 +136,6 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 // child loudly. A render that succeeds with a corrupted spec is the failure
 // mode this rules out.
 func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
-	rng := rand.New(rand.NewSource(seed(t) + 1))
 	const argoNS = "argo-cd"
 
 	hostile := []string{
@@ -145,110 +150,122 @@ func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
 		"[\"a\\u0000b\"]",
 		`["--", "-", "'; DROP TABLE", "$(whoami)", "{{ .Values }}"]`,
 		"\n\n", "\t", " [] ",
+		// Valid JSON, wrong leaf TYPE: without the child's kind guard these
+		// stringify ("map[]", "123") and apply silently. Each must fail now.
+		`[{"group":{},"kind":["x"]}]`,
+		`[{"group":true,"kind":"A"}]`,
+		`[{"group":"","kind":123}]`,
+		`[123, true, null]`,
+		`["ok", 123]`,
 	}
 
+	// Every hostile value runs against every override key. An earlier version
+	// picked one key at random per value, which left two thirds of the
+	// value-by-key matrix permanently unexercised at the fixed default seed.
+	keys := []struct{ short, key string }{
+		{"whitelist", "argocd.tenantoperator.stakater.com/cluster-resource-whitelist"},
+		{"blacklist", "argocd.tenantoperator.stakater.com/namespace-resource-blacklist"},
+		{"source-repos", "argocd.tenantoperator.stakater.com/source-repos"},
+	}
 	for i, raw := range hostile {
-		t.Run(fmt.Sprintf("value-%02d", i), func(t *testing.T) {
-			key := []string{
-				"argocd.tenantoperator.stakater.com/cluster-resource-whitelist",
-				"argocd.tenantoperator.stakater.com/namespace-resource-blacklist",
-				"argocd.tenantoperator.stakater.com/source-repos",
-			}[rng.Intn(3)]
-
-			rendered, childErrs := TwoStage(t, Fixture{
-				Values: map[string]any{
-					"argocd":      map[string]any{"namespace": argoNS},
-					"scaffolding": map[string]any{"mode": "Always"},
-				},
-				Cluster: map[string]any{
-					"tenants": []any{
-						map[string]any{"metadata": map[string]any{
-							"name":        "fuzzed",
-							"annotations": map[string]any{key: raw},
-						}, "spec": map[string]any{}},
-						// A bystander: whatever the hostile value does, it must
-						// not reach this tenant.
-						map[string]any{"metadata": map[string]any{"name": "bystander"}, "spec": map[string]any{}},
+		for _, k := range keys {
+			key := k.key
+			t.Run(fmt.Sprintf("value-%02d-%s", i, k.short), func(t *testing.T) {
+				rendered, childErrs := TwoStage(t, Fixture{
+					Values: map[string]any{
+						"argocd":      map[string]any{"namespace": argoNS},
+						"scaffolding": map[string]any{"mode": "Always"},
 					},
-					"namespaces": []any{},
-					"integrationConfig": map[string]any{
-						"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{}, "groups": []any{}}},
+					Cluster: map[string]any{
+						"tenants": []any{
+							map[string]any{"metadata": map[string]any{
+								"name":        "fuzzed",
+								"annotations": map[string]any{key: raw},
+							}, "spec": map[string]any{}},
+							// A bystander: whatever the hostile value does, it must
+							// not reach this tenant.
+							map[string]any{"metadata": map[string]any{"name": "bystander"}, "spec": map[string]any{}},
+						},
+						"namespaces": []any{},
+						"integrationConfig": map[string]any{
+							"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{}, "groups": []any{}}},
+						},
 					},
-				},
-			})
+				})
 
-			if _, bystanderFailed := childErrs["mto-argocd-tenant-bystander"]; bystanderFailed {
-				t.Errorf("a hostile annotation on one tenant broke another: %v", childErrs)
-			}
-
-			docs, err := Documents(rendered)
-			if err != nil {
-				t.Fatalf("render is not valid YAML: %v\n%s", err, rendered)
-			}
-
-			// The bystander must ALWAYS render, whatever the hostile value did.
-			// Without this the whole test was vacuous: if nothing rendered, the
-			// loop below never ran and the subtest passed having asserted
-			// nothing at all.
-			if !hasDoc(docs, "bystander") {
-				t.Fatalf("bystander did not render; value %q broke an unrelated tenant", raw)
-			}
-
-			_, fuzzedFailed := childErrs["mto-argocd-tenant-fuzzed"]
-			if !fuzzedFailed && !hasDoc(docs, "fuzzed") {
-				t.Fatalf("value %q neither failed its child nor produced an AppProject", raw)
-			}
-
-			for _, ap := range docs {
-				meta, _ := ap["metadata"].(map[string]any)
-				if meta["name"] != "fuzzed" {
-					continue
+				if _, bystanderFailed := childErrs["mto-argocd-tenant-bystander"]; bystanderFailed {
+					t.Errorf("a hostile annotation on one tenant broke another: %v", childErrs)
 				}
-				// It rendered, so the value parsed. Whatever it parsed to must
-				// still produce a structurally sound AppProject.
-				sp, _ := ap["spec"].(map[string]any)
-				if _, ok := sp["destinations"].([]any); !ok {
-					t.Errorf("value %q rendered an AppProject with no destinations", raw)
+
+				docs, err := Documents(rendered)
+				if err != nil {
+					t.Fatalf("render is not valid YAML: %v\n%s", err, rendered)
 				}
-				if roles, _ := sp["roles"].([]any); len(roles) != 3 {
-					t.Errorf("value %q rendered %d roles", raw, len(roles))
+
+				// The bystander must ALWAYS render, whatever the hostile value did.
+				// Without this the whole test was vacuous: if nothing rendered, the
+				// loop below never ran and the subtest passed having asserted
+				// nothing at all.
+				if !hasDoc(docs, "bystander") {
+					t.Fatalf("bystander did not render; value %q broke an unrelated tenant", raw)
 				}
-				for _, field := range []string{"clusterResourceWhitelist", "namespaceResourceBlacklist", "sourceRepos"} {
-					v, present := sp[field]
-					if !present {
+
+				_, fuzzedFailed := childErrs["mto-argocd-tenant-fuzzed"]
+				if !fuzzedFailed && !hasDoc(docs, "fuzzed") {
+					t.Fatalf("value %q neither failed its child nor produced an AppProject", raw)
+				}
+
+				for _, ap := range docs {
+					meta, _ := ap["metadata"].(map[string]any)
+					if meta["name"] != "fuzzed" {
 						continue
 					}
-					items, ok := v.([]any)
-					if !ok {
-						t.Errorf("value %q rendered %s as %T, not a list", raw, field, v)
-						continue
+					// It rendered, so the value parsed. Whatever it parsed to must
+					// still produce a structurally sound AppProject.
+					sp, _ := ap["spec"].(map[string]any)
+					if _, ok := sp["destinations"].([]any); !ok {
+						t.Errorf("value %q rendered an AppProject with no destinations", raw)
 					}
-					// A list is not enough: the earlier version stopped here,
-					// which is why it could not catch YAML injection. Every
-					// entry must also be the right SHAPE, so a payload that
-					// smuggles extra list items in through a string is caught.
-					for _, it := range items {
-						switch field {
-						case "sourceRepos":
-							if _, ok := it.(string); !ok {
-								t.Errorf("value %q put a %T in sourceRepos", raw, it)
-							}
-						default:
-							m, ok := it.(map[string]any)
-							if !ok {
-								t.Errorf("value %q put a %T in %s", raw, it, field)
-								continue
-							}
-							for k := range m {
-								if k != "group" && k != "kind" {
-									t.Errorf("value %q smuggled key %q into %s", raw, k, field)
+					if roles, _ := sp["roles"].([]any); len(roles) != 3 {
+						t.Errorf("value %q rendered %d roles", raw, len(roles))
+					}
+					for _, field := range []string{"clusterResourceWhitelist", "namespaceResourceBlacklist", "sourceRepos"} {
+						v, present := sp[field]
+						if !present {
+							continue
+						}
+						items, ok := v.([]any)
+						if !ok {
+							t.Errorf("value %q rendered %s as %T, not a list", raw, field, v)
+							continue
+						}
+						// A list is not enough: the earlier version stopped here,
+						// which is why it could not catch YAML injection. Every
+						// entry must also be the right SHAPE, so a payload that
+						// smuggles extra list items in through a string is caught.
+						for _, it := range items {
+							switch field {
+							case "sourceRepos":
+								if _, ok := it.(string); !ok {
+									t.Errorf("value %q put a %T in sourceRepos", raw, it)
+								}
+							default:
+								m, ok := it.(map[string]any)
+								if !ok {
+									t.Errorf("value %q put a %T in %s", raw, it, field)
+									continue
+								}
+								for k := range m {
+									if k != "group" && k != "kind" {
+										t.Errorf("value %q smuggled key %q into %s", raw, k, field)
+									}
 								}
 							}
 						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -256,8 +273,11 @@ func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
 // cluster on each reconcile, so its cost is the thing that grows -- one
 // gotemplate execution over N tenants x M namespaces, not N executions.
 //
-// This is a floor, not a benchmark: it catches an accidentally quadratic
-// change in the filter loop, which is the plausible regression.
+// This asserts correctness at scale (every tenant renders, every destination
+// count holds) and logs the elapsed time. It makes no timing assertion --
+// that would be flaky across machines -- so an accidentally quadratic change
+// in the filter loop shows up as an obvious jump in the logged time, not as
+// a red test.
 func TestScaleManyTenants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("scale test skipped under -short")
@@ -369,7 +389,17 @@ func randName(rng *rand.Rand, n int) string {
 	}
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = alphabet[rng.Intn(len(alphabet)-1)] // never a trailing hyphen
+		b[i] = alphabet[rng.Intn(len(alphabet))]
+	}
+	// DNS-1123 names must start AND end alphanumeric; hyphens anywhere in
+	// between are legal and common, so hyphenated tenant names must stay in
+	// the generated set. (An earlier version excluded '-' from every
+	// position, so the common real-world shape was never fuzzed at all.)
+	if b[0] == '-' {
+		b[0] = 'x'
+	}
+	if b[n-1] == '-' {
+		b[n-1] = 'x'
 	}
 	return string(b)
 }
