@@ -40,10 +40,10 @@ func TestLiveObjectSemantics(t *testing.T) {
 	})
 	waitReady(t, gvkTemplateIn, operatorNS, "mto-argocd-parent")
 
-	// MIGRATION.md's load-bearing claim, and the one nothing else can check:
+	// The load-bearing adoption claim, and the one nothing else can check:
 	// adopting an AppProject that already exists is an in-place rewrite, not a
 	// delete and recreate. If it were a recreate, every project role's
-	// jwtTokens would be destroyed on migration day -- silently, because the
+	// jwtTokens would be destroyed on adoption -- silently, because the
 	// object would still be there afterwards.
 	t.Run("an AppProject that already exists is adopted in place", func(t *testing.T) {
 		createBareAppProject(t, fixtureTenantSecondary, "hand made, not by this chart")
@@ -97,7 +97,7 @@ func TestLiveObjectSemantics(t *testing.T) {
 	// S19 says the ArgoCD namespace is always a destination. The child
 	// gotemplate guards against adding it twice when it also carries the tenant
 	// label -- a duplicate destination is not fatal to ArgoCD, but it is a
-	// silent diff on every migration comparison.
+	// silent diff on every equivalence comparison.
 	t.Run("the ArgoCD namespace is listed once even when labelled for a tenant", func(t *testing.T) {
 		relabelNamespace(t, argoNS, tenant)
 		t.Cleanup(func() { relabelNamespace(t, argoNS, "") })
@@ -337,8 +337,8 @@ func TestFailuresStayContained(t *testing.T) {
 // ------------------------------------------------------------------- helpers
 
 // createBareAppProject writes the kind of AppProject a cluster already has
-// before migration: no ownership labels, no chart annotations, a description
-// nobody else would write.
+// before this chart adopts it: no ownership labels, no chart annotations, a
+// description nobody else would write.
 func createBareAppProject(t *testing.T, name, description string) {
 	t.Helper()
 	ap := newAppProject(name)

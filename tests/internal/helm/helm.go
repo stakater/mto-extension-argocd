@@ -4,8 +4,8 @@
 // It holds no chart content. The chart lives in charts/mto-extension-argocd and
 // nowhere else; this package only points at it.
 //
-// It exists because all four suites resolved both facts independently and one
-// of them drifted. tests/render, tests/migrate and tests/admission read $HELM
+// It exists because every suite resolved both facts independently and one
+// of them drifted. tests/render and tests/admission read $HELM
 // with a "helm" fallback; tests/e2e called bare "helm", so it rendered and
 // installed the chart with whatever version happened to be on PATH while every
 // other suite and CI used the pinned v3.16.3. The chart is version-sensitive on

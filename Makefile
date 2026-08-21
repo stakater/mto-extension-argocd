@@ -49,10 +49,6 @@ helm-lint: helm ## Lint the chart. argocd.namespace is required, so lint has to 
 helm-render-test: helm ## Render tests: execute both gotemplates against fixtures and diff the AppProjects.
 	HELM=$(HELM) go test -count=1 ./tests/render/...
 
-.PHONY: migrate-test
-migrate-test: helm ## Test hack/mto-argocd-migrate against a fake cluster. No cluster needed.
-	HELM=$(HELM) go test -count=1 ./tests/migrate/...
-
 .PHONY: helm-render-test-regenerate
 helm-render-test-regenerate: helm ## Rewrite the golden files. Review the diff before committing.
 	HELM=$(HELM) REGENERATE=1 go test -count=1 ./tests/render/...
@@ -71,7 +67,7 @@ vet: ## Vet and format-check the test harness.
 .PHONY: test
 # CI calls this target directly rather than re-listing its prerequisites, so
 # adding one here is enough to make it run on every pull request.
-test: helm-lint vet helm-render-test migrate-test admission-test ## Everything CI runs.
+test: helm-lint vet helm-render-test admission-test ## Everything CI runs.
 
 .PHONY: helm-login
 helm-login: helm ## Log in to the OCI chart registry.

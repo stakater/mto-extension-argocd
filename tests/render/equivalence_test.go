@@ -30,10 +30,9 @@ import (
 //	                 the fixture changes. For `pe` that is one user on the
 //	                 owner role and nothing on edit or view.
 //
-// It also pins the one thing a future migration will depend on: the two resource
-// lists are seeded into chart values from the IntegrationConfig's deprecated
-// .spec.integrations.argocd, and the diff is only empty because that seeding is
-// faithful.
+// It also pins that the two resource lists are seeded into chart values from
+// the IntegrationConfig's deprecated .spec.integrations.argocd, and the diff is
+// only empty because that seeding is faithful.
 const spikeFixtures = "../../docs/plans/spike-argocd-tov2/fixtures"
 
 func TestEquivalenceWithExtensionsController(t *testing.T) {
@@ -67,8 +66,7 @@ func TestEquivalenceWithExtensionsController(t *testing.T) {
 		Values: map[string]any{
 			"argocd": map[string]any{
 				"namespace": argoNS,
-				// Seeded from the deprecated IntegrationConfig fields, exactly
-				// as the migration instructs.
+				// Seeded from the deprecated IntegrationConfig fields.
 				"clusterResourceWhitelist":   argoIntegration["clusterResourceWhitelist"],
 				"namespaceResourceBlacklist": argoIntegration["namespaceResourceBlacklist"],
 			},

@@ -36,14 +36,14 @@ argocd:
   # AppProject entirely -- which ArgoCD reads as "no cluster-scoped resources".
   #
   # Formerly IntegrationConfig .spec.integrations.argocd.clusterResourceWhitelist
-  # (deprecated). Seed this from the live IntegrationConfig at migration time or
-  # the Phase 2 equivalence diff is non-empty by construction.
+  # (deprecated). On an existing cluster, seed this from the live
+  # IntegrationConfig or every tenant's AppProject silently loses the list.
   clusterResourceWhitelist: []
   #  - group: ""
   #    kind: Namespace
 
   # Namespaced kinds every tenant's AppProject may NOT manage. Same override and
-  # migration rules as clusterResourceWhitelist.
+  # seeding rules as clusterResourceWhitelist.
   namespaceResourceBlacklist: []
   #  - group: ""
   #    kind: ResourceQuota

@@ -28,10 +28,10 @@ argocd:
 
   # Cluster-scoped kinds tenants may manage, and namespaced kinds they may not.
   #
-  # MIGRATING from ExtensionsArgoCDReconciler? Copy these from the live
+  # Coming from ExtensionsArgoCDReconciler? Copy these from the live
   # IntegrationConfig's .spec.integrations.argocd, which is deprecated and no
   # longer read. Miss them and every tenant's AppProject silently loses both
-  # lists, and the equivalence diff is non-empty by construction.
+  # lists.
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
