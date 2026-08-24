@@ -400,9 +400,8 @@ func TestStrictSyncRequiresFinalizersExemption(t *testing.T) {
 }
 
 // The shipped default is strict WITH the exemption, because under revert a
-// deleted AppProject wedges in Terminating forever (docs/upstream-issues.md,
-// TOV2-2). If someone relaxes this default, it should be a deliberate,
-// visible change.
+// deleted AppProject wedges in Terminating forever. If someone relaxes this
+// default, it should be a deliberate, visible change.
 func TestDefaultSyncModeIsStrictAndSafe(t *testing.T) {
 	docs := MustHelmTemplate(t, "", map[string]string{"argocd.namespace": "openshift-gitops"})
 	for _, name := range []string{parentTemplateName, childTemplateName} {

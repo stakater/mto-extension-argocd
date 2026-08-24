@@ -32,8 +32,6 @@ import (
 // Everything here is created before the tests run and removed afterwards; a
 // leftover from a killed run is adopted rather than duplicated, so re-running
 // against a still-up cluster works.
-//
-// Scenario tags like S19 and S21 refer to docs/plans/TASKS-argocd-extension.md.
 
 const (
 	// The primary tenant. Every test that needs one opted-in tenant uses this.

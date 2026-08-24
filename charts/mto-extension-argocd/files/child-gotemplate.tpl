@@ -3,7 +3,7 @@ Renders ONE tenant's AppProject. Executed by template-operator-v2, not by Helm
 -- the surrounding chart embeds this file verbatim via .Files.Get, so nothing
 here is a Helm template.
 
-Ported from docs/plans/spike-argocd-tov2/02-templates.yaml, which produced an
+Ported from the live-cluster spike, whose manifests produced an
 AppProject byte-identical to ExtensionsArgoCDReconciler's on a live cluster.
 Two deliberate deltas since: the description, and roles[].groups gaining the
 tenant's users.

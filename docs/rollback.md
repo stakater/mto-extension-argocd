@@ -21,7 +21,7 @@ has nothing to reap. The object is never deleted and its UID never changes.
 On template-operator-v2 `8a44194` and later, `onDeletePurgeAppProject: false` —
 the chart default — already makes an opt-out release the AppProject rather than
 delete it, and none of this is needed. On v0.0.6 and earlier it is deleted
-regardless ([TOV2-1](upstream-issues.md)); the detach below is the workaround.
+regardless; the detach below is the workaround.
 
 The pieces are measured — adoption, the reap, the strict webhook — but **this
 sequence is not.** Treat it as an incident procedure and rehearse it on staging.
@@ -52,12 +52,12 @@ same UID, pinned by `tests/e2e`.
 **Never `helm uninstall` on its own.** It deletes the RBAC and the
 `TemplateInstance`s together, and each `TemplateInstance`'s finalizer needs that
 RBAC to delete its `AppProject`. Teardown deadlocks and every object needs its
-finalizer cleared by hand ([TOV2-5](upstream-issues.md)).
+finalizer cleared by hand.
 
 ```bash
 # 1. drop the parent. Children and their AppProjects drain while the RBAC still
 #    exists. On template-operator-v2 8a44194+ the AppProjects are RELEASED and
-#    survive; on v0.0.6 and earlier they are DELETED regardless (TOV2-1).
+#    survive; on v0.0.6 and earlier they are DELETED regardless.
 kubectl delete templateinstances.templates.v2.stakater.com \
   mto-argocd-parent -n multi-tenant-operator
 

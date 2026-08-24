@@ -142,7 +142,7 @@ sync:
   # is never released, its drift check reports "No drift detected" because the
   # spec still matches, and the owning TemplateInstance goes on reporting
   # Ready=True while ArgoCD refuses to use a Terminating project. Reproduced on
-  # a live cluster; see docs/upstream-issues.md (TOV2-2).
+  # a live cluster.
   #
   # Under `strict` the delete is simply denied:
   #
@@ -183,9 +183,8 @@ sync:
   #     self-heal. It is not hypothetical: helmify drops matchConditions when
   #     generating tov2's chart, and only a release-time postprocess step puts
   #     it back. The published chart (checked at 0.0.6) HAS it; a chart built
-  #     from a tov2 checkout does not. Measured on a fresh cluster; see TOV2-9
-  #     in docs/upstream-issues.md, and hack/e2e/scope-tov2-webhook.sh for the
-  #     one-command repair.
+  #     from a tov2 checkout does not. Measured on a fresh cluster; see
+  #     hack/e2e/scope-tov2-webhook.sh for the one-command repair.
   #
   # ArgoCD writing AppProject status is NOT blocked: `status` is in
   # template-operator-v2's ServerManagedFields and always stripped before

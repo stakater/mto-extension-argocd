@@ -10,9 +10,9 @@ on:
   push:
     branches:
       - main
-    # Mirrors pull_request.yaml, including NOT ignoring docs/**: the
-    # equivalence test reads its reference data from
-    # docs/plans/spike-argocd-tov2/fixtures/, which cannot be regenerated.
+    # Mirrors pull_request.yaml. The equivalence test's reference data lives in
+    # tests/render/testdata/ and cannot be regenerated, so nothing here may
+    # cover it.
     paths-ignore:
       - '*.md'
       - 'examples/**'

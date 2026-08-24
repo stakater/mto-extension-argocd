@@ -19,8 +19,6 @@ import (
 // PRODUCE. These assert what happens to objects that already exist -- an
 // AppProject someone else created, a namespace that changes owner, a field the
 // chart stops setting.
-//
-// Scenario tags like S19 refer to docs/plans/TASKS-argocd-extension.md.
 
 func TestLiveObjectSemantics(t *testing.T) {
 	requireManagedTenants(t)

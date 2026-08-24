@@ -219,7 +219,7 @@ func TestLifecycle(t *testing.T) {
 		if got := spec["description"]; got != "Managed by mto-extension-argocd" {
 			t.Errorf("description = %v", got)
 		}
-		// S19 (scenario tags refer to docs/plans/TASKS-argocd-extension.md):
+		// S19:
 		// the ArgoCD namespace is always a destination. On a tenant with
 		// no labelled namespaces it is the ONLY one -- and the tenant must
 		// still get a project rather than be skipped.
@@ -496,7 +496,7 @@ func TestRevertModeWedgesOnDelete(t *testing.T) {
 		t.Fatal("AppProject was deleted and not recreated — worse than the known bug")
 	}
 	if stuck.GetDeletionTimestamp() == nil {
-		t.Log("FIXED UPSTREAM: revert no longer wedges on delete — update this test and docs/upstream-issues.md")
+		t.Log("FIXED UPSTREAM: revert no longer wedges on delete — update this test")
 		return
 	}
 	t.Logf("reproduced: stuck Terminating with finalizers %v while its TemplateInstance reports Ready=%v",

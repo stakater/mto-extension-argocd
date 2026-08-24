@@ -10,11 +10,9 @@ import (
 	"testing"
 )
 
-const spikeFixtures = "../../docs/plans/spike-argocd-tov2/fixtures"
+const spikeFixtures = "testdata"
 
-// TestEquivalenceWithExtensionsController is D3 -- cross-implementation
-// equivalence. (Scenario tags like D3 refer to
-// docs/plans/TASKS-argocd-extension.md.)
+// TestEquivalenceWithExtensionsController is cross-implementation equivalence.
 //
 // Every other test in this package asserts the chart against itself. This one
 // asserts it against the thing it replaces: golden-appproject-pe.json is

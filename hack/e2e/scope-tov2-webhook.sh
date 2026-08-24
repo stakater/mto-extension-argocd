@@ -30,9 +30,9 @@
 #   3. the webhook therefore stays unreachable for ever. `helm install --wait`
 #      times out, Deployments never report Available, and nothing self-heals.
 #
-# Measured on a fresh kind cluster, not theorised. Recorded as TOV2-9 in
-# docs/upstream-issues.md, and it is the reason this chart's values.yaml can
-# claim a bounded blast radius for sync.mode=strict at all.
+# Measured on a fresh kind cluster, not theorised, and it is the reason this
+# chart's values.yaml can claim a bounded blast radius for sync.mode=strict at
+# all.
 #
 # Patching an admission webhook out from under an unhealthy cluster works
 # because the API server does not consult webhooks for requests on
@@ -110,7 +110,7 @@ fi
 
 echo "WARNING: sync-enforcement webhook has no matchConditions -- it matches UPDATE and DELETE"
 echo "         on every resource in the cluster with failurePolicy: Fail. Scoping it to"
-echo "         templates.v2.stakater.com/instance. See TOV2-9 in docs/upstream-issues.md."
+echo "         templates.v2.stakater.com/instance."
 
 patch=$(printf '%s' "${EXPRESSION}" \
 	| jq -Rs '[{"op":"add","path":"/webhooks/0/matchConditions","value":[{"name":"managed-by-template-operator","expression":.}]}]')

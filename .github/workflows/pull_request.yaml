@@ -3,12 +3,11 @@ name: Pull Request
 on:
   pull_request:
     branches: [main]
-    # Deliberately NOT ignoring docs/**. The equivalence test reads its
-    # reference data from docs/plans/spike-argocd-tov2/fixtures/ -- the captured
-    # output of the Go controller, which cannot be regenerated once ArgoCD is
-    # uninstalled from the cluster that produced it (docs/live-deployment.md
-    # records it still running there for now). Ignoring docs/ would let a
-    # change to that data skip every job.
+    # The equivalence test reads its reference data from tests/render/testdata/
+    # -- the captured output of the Go controller, which cannot be regenerated
+    # once ArgoCD is uninstalled from the cluster that produced it
+    # (docs/live-deployment.md records it still running there for now). It sits
+    # under tests/, so no entry below can let a change to it skip a job.
     paths-ignore:
       - '*.md'
       - 'examples/**'

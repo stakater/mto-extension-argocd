@@ -74,7 +74,7 @@ Remove the annotation and the `AppProject` goes away again.
 | [multi-tenant-operator][mto] | `Tenant` v1beta3 and `IntegrationConfig` v1beta1 |
 | [template-operator-v2][tov2] | v0.0.5 or later. `sync.mode: strict`, the default, needs the sync webhook from v0.0.3 |
 | ArgoCD | `argoproj.io/v1alpha1` `AppProject` |
-| Kubernetes | 1.33+ tested. tov2's CRDs do not install on 1.31 ([TOV2-3](docs/upstream-issues.md)) |
+| Kubernetes | 1.33+ tested. tov2's CRDs do not install on 1.31 |
 
 ## Quick start
 
@@ -228,7 +228,7 @@ granting access to nobody.
 `sync.mode` defaults to `strict`, so a managed AppProject cannot be hand-edited
 or deleted — tov2's admission webhook refuses both. Under the looser `revert`,
 a deleted AppProject wedges in `Terminating` forever while its TemplateInstance
-still reports healthy ([TOV2-2](docs/upstream-issues.md)).
+still reports healthy.
 
 `argocd proj role create-token` keeps working: ArgoCD writes tokens into
 `spec.roles[].jwtTokens`, which the chart exempts.
@@ -239,7 +239,7 @@ Removing a tenant's opt-in annotation, narrowing `scaffolding.mode`, deleting
 or renaming the `Tenant`, or uninstalling — **unless** `onDeletePurgeAppProject`
 is false, the default, *and* template-operator-v2 is new enough to honour it
 (`8a44194`+). There the project is released rather than deleted; on v0.0.6 and
-earlier it is deleted regardless ([TOV2-1](docs/upstream-issues.md)).
+earlier it is deleted regardless.
 `make e2e-kind` reports which behaviour a given cluster has.
 
 A failing parent does *not* delete anything — tov2 holds the last rendered set,
@@ -270,7 +270,7 @@ kubectl get templateinstances.templates.v2.stakater.com mto-argocd-parent \
 Never `helm uninstall` on its own. It deletes the RBAC and the
 TemplateInstances together, and each TemplateInstance's finalizer needs that
 RBAC to delete its AppProject — so teardown deadlocks and every object needs
-its finalizer cleared by hand ([TOV2-5](docs/upstream-issues.md)).
+its finalizer cleared by hand.
 
 ```bash
 # 1. drop the parent; children and their AppProjects drain while RBAC exists
@@ -283,7 +283,7 @@ helm uninstall mto-extension-argocd -n <operatorNamespace>
 
 `helm install` prints this too. Reinstalling immediately afterwards fails with
 an ownership-metadata error — wait for `Template/mto-argocd-parent` to
-disappear first ([TOV2-4](docs/upstream-issues.md)).
+disappear first.
 
 This procedure is not just documented, it is executed: `tests/e2e` tears every
 release down exactly this way, so a change that broke the order would fail the

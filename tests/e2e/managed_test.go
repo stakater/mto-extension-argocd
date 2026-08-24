@@ -22,8 +22,6 @@ import (
 // nobody wants a scaffolding-mode change or an ArgoCD Application landing on a
 // licensed cluster with real tenants on it. They skip rather than fail there,
 // and `make e2e-kind` always runs them.
-//
-// Scenario tags like D1, S21 and C4 refer to docs/plans/TASKS-argocd-extension.md.
 
 var gvkApplication = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
 
