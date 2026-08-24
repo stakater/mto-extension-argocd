@@ -72,10 +72,17 @@ vet: ## Vet and format-check the test harness.
 		echo "run: gofmt -w ." >&2; exit 1; \
 	fi
 
+.PHONY: migrate-test
+migrate-test: ## Pin hack/mto-argocd-migrate against a fake cluster. No real cluster needed.
+	@# Shells out to the script for every case, so it is the slowest suite here
+	@# (~40s) and the only one that notices a change to what the script PRINTS --
+	@# which is its interface: an operator runs it once, on production.
+	go test -count=1 ./tests/migrate/...
+
 .PHONY: test
 # CI calls this target directly rather than re-listing its prerequisites, so
 # adding one here is enough to make it run on every pull request.
-test: helm-lint vet helm-render-test admission-test ## Everything CI runs.
+test: helm-lint vet helm-render-test admission-test migrate-test ## Everything CI runs.
 
 .PHONY: helm-login
 helm-login: helm ## Log in to the OCI chart registry.

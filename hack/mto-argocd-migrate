@@ -1,0 +1,2013 @@
+#!/usr/bin/env bash
+#
+# mto-argocd-migrate -- move tenants from ExtensionsArgoCDReconciler to this
+# chart, one tenant at a time, without deleting or disrupting an AppProject.
+#
+# The runbook is MIGRATION.md. This script is the executable half of it: every
+# command below is one numbered step there, and every command that writes to the
+# cluster is a dry run until you pass --apply.
+#
+# Three things that are not obvious from the code:
+#
+#   * The chart's live configuration -- annotation keys, scaffolding mode, ArgoCD
+#     namespace -- is read off `Template/mto-argocd-parent`, not taken as flags. A
+#     hand-typed second copy would write annotations nothing reads.
+#
+#   * `handover` deletes a tenant's Extensions CR BEFORE opting that tenant in.
+#     The Extensions finalizer is released only by ExtensionsArgoCDReconciler, so
+#     the CR has to go while that controller still runs; once it is gone the
+#     controller has nothing to reconcile for that tenant, so the two writers
+#     never contend.
+#
+#   * Nothing here turns the old controller off. Scaling it down is reverted by
+#     OLM or Helm on the next resync, and per the ordering above it buys nothing.
+#     Removing it belongs to the tenant-operator upgrade, once zero Extensions
+#     CRs remain.
+#
+# Requires: kubectl, jq. Works on bash 3.2 (macOS) and later.
+
+set -euo pipefail
+
+readonly EXTENSIONS_GVR='extensions.tenantoperator.stakater.com'
+readonly EXTENSIONS_CRD='extensions.tenantoperator.stakater.com'
+readonly TENANTS_GVR='tenants.tenantoperator.stakater.com'
+readonly INTEGRATIONCONFIGS_GVR='integrationconfigs.tenantoperator.stakater.com'
+readonly APPPROJECTS_GVR='appprojects.argoproj.io'
+readonly APPPROJECT_APIVERSION='argoproj.io/v1alpha1'
+readonly APPPROJECT_KIND='AppProject'
+readonly TEMPLATEINSTANCES_GVR='templateinstances.templates.v2.stakater.com'
+readonly TEMPLATES_GVR='templates.templates.v2.stakater.com'
+
+readonly PARENT_NAME='mto-argocd-parent'
+readonly CHILD_PREFIX='mto-argocd-tenant-'
+
+# The ownerRef ExtensionsArgoCDReconciler stripped on every reconcile, and that
+# nothing strips once that controller is gone. See MIGRATION.md, step 4.
+readonly LEGACY_OWNER_APIVERSION='tenantoperator.stakater.com/v1beta2'
+readonly LEGACY_OWNER_KIND='Tenant'
+
+CONTEXT=''
+OPERATOR_NS='multi-tenant-operator'
+IC_NAME='tenant-operator-config'
+IC_NS=''
+APPLY=0
+ASSUME_YES=0
+
+usage() {
+  cat <<'EOF'
+mto-argocd-migrate -- migrate tenants from the Extensions controller to
+                      mto-extension-argocd. A dry run unless --apply is given.
+
+USAGE
+  hack/mto-argocd-migrate [global flags] <command> [args]
+
+COMMANDS
+  run                    The whole migration, one step at a time. START HERE.
+  inventory              What exists today, and what each tenant needs. Read-only.
+  values                 Chart values seeded from the live IntegrationConfig.
+  annotations            Per-tenant overrides, carried across from the Extensions CRs.
+  strip-owner-refs [<tenant>...]
+                         Remove legacy v1beta2 Tenant ownerRefs from AppProjects.
+                         Named tenants only, or every AppProject if none are given.
+  snapshot <dir>         Save every AppProject, normalised, for later comparison.
+  handover <tenant>...   Hand a tenant's AppProject from the old controller to the
+                         chart: retain it, drain the Extensions CR, opt the tenant
+                         in, wait for the chart to adopt it. `cutover` still works.
+  diff <dir>             Compare live AppProjects against a snapshot.
+
+GLOBAL FLAGS
+  --context <name>          kubectl context to use.
+  --operator-namespace <ns> Where the chart's Templates live. Default: multi-tenant-operator.
+  --integrationconfig <n>   IntegrationConfig name. Default: tenant-operator-config.
+  --ic-namespace <ns>       IntegrationConfig namespace. Default: --operator-namespace.
+  --apply                   Actually write to the cluster. A dry run without it.
+  --yes                     Skip the confirmation prompt --apply shows.
+  --state-dir <dir>         Where `run` keeps the snapshot. Default: .mto-argocd-migrate
+  --batch <n>               How many tenants `run` offers at once. Default: 1
+  -h, --help                This message.
+
+The runbook these commands belong to is MIGRATION.md.
+EOF
+}
+
+# -- plumbing ----------------------------------------------------------------
+
+die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
+# One exit trap for every temporary. Per-function `trap ... EXIT` handlers replace
+# each other, so a command running two of them leaks the first one's temp.
+CLEANUP_PATHS=()
+cleanup() { local p; for p in ${CLEANUP_PATHS[@]+"${CLEANUP_PATHS[@]}"}; do rm -rf "$p"; done; }
+trap cleanup EXIT
+cleanup_add() { CLEANUP_PATHS[${#CLEANUP_PATHS[@]}]=$1; }
+warn() { printf '\nwarning: %s\n' "$*" >&2; }
+# self_invocation is how to call this script again with the SAME global flags. Any
+# printed command that drops --context or --operator-namespace fails on every
+# cluster whose namespaces are not the chart defaults.
+self_invocation() {
+  local out=$0
+  [[ -n $CONTEXT ]] && out+=" --context=$CONTEXT"
+  [[ $OPERATOR_NS != multi-tenant-operator ]] && out+=" --operator-namespace=$OPERATOR_NS"
+  [[ $IC_NAME != tenant-operator-config ]] && out+=" --integrationconfig=$IC_NAME"
+  [[ $IC_NS != "$OPERATOR_NS" ]] && out+=" --ic-namespace=$IC_NS"
+  # --state-dir especially: `run` keeps its snapshot there, so a hint that drops
+  # it sends the next invocation at the default directory and reports work as
+  # not done.
+  [[ $STATE_DIR != .mto-argocd-migrate ]] && out+=" --state-dir=$STATE_DIR"
+  [[ $BATCH != 1 ]] && out+=" --batch=$BATCH"
+  printf '%s' "$out"
+}
+
+# SQ exists because bash 3.2 starts a new quoted string at a ' inside ${...},
+# even within double quotes, and the file then stops parsing.
+readonly SQ="'"
+
+# yaml_squote renders a value as a YAML single-quoted scalar. YAML escapes an
+# embedded quote by doubling it, so this is exact for every value.
+yaml_squote() { printf "'%s'" "${1//$SQ/$SQ$SQ}"; }
+
+# plural <count> <singular> <plural> -- "1 entry", "2 entries".
+plural() { if [[ $1 == 1 ]]; then printf '%s %s' "$1" "$2"; else printf '%s %s' "$1" "$3"; fi; }
+
+if [[ -t 1 ]]; then
+  heading() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+else
+  heading() { printf '\n%s\n' "$*"; }
+fi
+
+# confirm gates --apply when there is something to lose. Reads /dev/tty, not
+# stdin, so it still works when the caller pipes this script's output somewhere.
+confirm() {
+  (( ASSUME_YES )) && return 0
+  local reply=''
+  printf '  %s [y/N] ' "$1" >&2
+  if [[ -r /dev/tty ]]; then read -r reply </dev/tty; else read -r reply || true; fi
+  case $reply in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+kc() {
+  if [[ -n $CONTEXT ]]; then
+    kubectl --context="$CONTEXT" "$@"
+  else
+    kubectl "$@"
+  fi
+}
+
+# run echoes a mutating command and executes it only under --apply. Every write
+# goes through it, so a dry run is dry by construction rather than by remembering
+# to guard each call site. What it echoes is the real kubectl invocation, not the
+# `kc` wrapper, so a dry run doubles as a list of commands you can paste.
+run() {
+  local shown=("$@")
+  if [[ ${shown[0]} == kc ]]; then
+    if [[ -n $CONTEXT ]]; then
+      shown=(kubectl "--context=$CONTEXT" "${shown[@]:1}")
+    else
+      shown=(kubectl "${shown[@]:1}")
+    fi
+  fi
+  # Quote every word for the shell: these values are JSON, and a naive
+  # "${shown[*]}" space-join yields  ...=[{"group":"","kind":"PersistentVolume"}]
+  # which zsh globs and bash strips the inner quotes from. Only the pasted-by-hand
+  # path is affected -- --apply execs the array.
+  local quoted=() w
+  for w in "${shown[@]}"; do
+    if [[ $w == *[^A-Za-z0-9_.:/=@,-]* ]]; then
+      # Single-quote by preference: %q is correct but renders JSON as
+      # \{\"metadata\"... . Fall back to it only when the word contains a ' itself.
+      if [[ $w == *\'* ]]; then quoted+=("$(printf '%q' "$w")"); else quoted+=("'$w'"); fi
+    else
+      quoted+=("$w")
+    fi
+  done
+  if (( APPLY )); then
+    printf '     + %s\n' "${quoted[*]}"
+    "$@"
+  else
+    # In a dry run the command IS the output. Printed against the `kube()` shim
+    # the header defines, rather than repeating a 60-character --context on
+    # every line.
+    local short=("${quoted[@]}")
+    if [[ ${short[0]} == kubectl ]]; then
+      short=("kube" "${short[@]:1}")
+      [[ ${short[1]} == --context=* ]] && short=("kube" "${short[@]:2}")
+    fi
+    printf '     %s\n' "${short[*]}"
+  fi
+}
+
+require_tools() {
+  local tool
+  for tool in kubectl jq; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is required but is not on PATH"
+  done
+}
+
+# extensions_json guards every read of the Extensions CRD. Once the
+# tenant-operator removal lands that CRD is gone, and `kubectl get` on a missing
+# kind is an error -- which under `set -e` reads as a broken cluster rather than
+# as a finished migration.
+#
+# Only a genuinely ABSENT CRD may read as "no Extensions". Any other failure
+# (RBAC, timeout) has to stop the script: reading it as "drained" would let
+# handover opt a tenant in without deleting its Extensions CR.
+extensions_json() {
+  local crd
+  crd=$(kc get crd "$EXTENSIONS_CRD" --ignore-not-found -o name) \
+    || die "could not read CRD $EXTENSIONS_CRD. Refusing to guess whether Extensions
+       CRs remain: treating this as 'none' would skip draining them."
+  if [[ -n $crd ]]; then
+    kc get "$EXTENSIONS_GVR" -o json
+  else
+    echo '{"items":[]}'
+  fi
+}
+
+# appprojects_json fails LOUDLY when the list cannot be read. Falling back to "no
+# AppProjects" would let the GitOps hard stop and the ownerRef check pass
+# vacuously and misreport every tenant's state.
+appprojects_json() {
+  kc get "$APPPROJECTS_GVR" -n "$1" -o json \
+    || die "could not list AppProjects in namespace '$1'. Every check from here on
+       reads them, so continuing would run the migration blind."
+}
+
+integrationconfig_json() {
+  kc get "$INTEGRATIONCONFIGS_GVR" "$IC_NAME" -n "$IC_NS" -o json 2>/dev/null \
+    || die "IntegrationConfig $IC_NS/$IC_NAME not found.
+       Point --integrationconfig / --ic-namespace at the right one."
+}
+
+# -- chart configuration, read from the cluster ------------------------------
+
+PARENT_PARAMS=''
+
+# try_load_chart_config returns 1 when the chart is not installed rather than
+# dying, because `run` reports "not installed yet" as a state. A read that FAILS
+# is a different thing from a Template that is absent, so only the absent case
+# returns 1.
+try_load_chart_config() {
+  local parent
+  parent=$(kc get "$TEMPLATES_GVR" "$PARENT_NAME" -n "$OPERATOR_NS" -o json --ignore-not-found 2>/dev/null) \
+    || die "could not read Template/$PARENT_NAME in $OPERATOR_NS. This is not the same
+       as the chart not being installed -- check access and --context before retrying."
+  [[ -n $parent ]] || return 1
+  PARENT_PARAMS=$(jq -c '[.spec.parameters[] | select(has("value"))] | from_entries' <<<"$parent")
+}
+
+load_chart_config() {
+  try_load_chart_config || die "Template/$PARENT_NAME not found in namespace $OPERATOR_NS.
+       Install the chart first (MIGRATION.md, step 1), or point --operator-namespace
+       at the namespace holding it."
+}
+
+chart_value() {
+  jq -r --arg k "$1" '.[$k] // ""' <<<"$PARENT_PARAMS"
+}
+
+# The chart's per-tenant opt-in is an annotation under scaffolding.mode
+# OnAnnotation and a LABEL under OnLabel. Both keys default to the same string, so
+# reading the wrong metadata field is invisible in a default install and shows up
+# only as a step that never completes -- hence field and key resolved together.
+optin_field() {
+  case $(chart_value scaffoldingMode) in
+    OnLabel) echo labels ;;
+    *)       echo annotations ;;
+  esac
+}
+
+optin_key() {
+  case $(chart_value scaffoldingMode) in
+    OnLabel) chart_value scaffoldingLabelKey ;;
+    *)       chart_value scaffoldingAnnotationKey ;;
+  esac
+}
+
+# resource_list_canonical renders a clusterResourceWhitelist or
+# namespaceResourceBlacklist into a stable string so two can be compared by
+# CONTENT. Comparing lengths passes a chart carrying the right NUMBER of the wrong
+# kinds, and every adopted AppProject then silently loses the lists it should have
+# kept. Order carries no meaning on either side, so it is sorted away.
+#
+# Unparseable input canonicalises to a sentinel carrying the caller's tag ($2), so
+# a broken list reads as "not seeded" and two broken lists on OPPOSITE sides never
+# match each other. The output is captured before use so a jq that emits partial
+# output and then fails cannot leak it into the comparison.
+resource_list_canonical() {
+  local out
+  if out=$(jq -cS '[ (. // [])[] | {group: (.group // ""), kind: (.kind // "")} ]
+          | sort_by(.group, .kind)' <<<"${1:-[]}" 2>/dev/null); then
+    printf '%s\n' "$out"
+  else
+    printf 'unparseable(%s)\n' "${2:-input}"
+  fi
+}
+
+# -- inventory ---------------------------------------------------------------
+
+cmd_inventory() {
+  load_chart_config
+
+  local argo_ns scaffolding_mode annotation_key optin_in
+  argo_ns=$(chart_value argoNamespace)
+  scaffolding_mode=$(chart_value scaffoldingMode)
+  annotation_key=$(optin_key)
+  optin_in=$(optin_field)
+
+  heading "Chart"
+  printf '  release namespace   %s\n' "$OPERATOR_NS"
+  printf '  argocd.namespace    %s\n' "$argo_ns"
+  printf '  scaffolding.mode    %s\n' "$scaffolding_mode"
+  printf '  opt-in %-12s %s\n' "$( [[ $optin_in == labels ]] && echo label || echo annotation )" "$annotation_key"
+
+  if [[ $scaffolding_mode != OnAnnotation && $scaffolding_mode != OnLabel ]]; then
+    warn "scaffolding.mode is $scaffolding_mode. Migration is per tenant, and
+         Always opts every tenant in at once -- colliding with every Extensions CR
+         still on this cluster."
+  fi
+
+  local ic ic_argo_ns wl_count bl_count
+  ic=$(integrationconfig_json)
+  ic_argo_ns=$(jq -r '.spec.integrations.argocd.namespace // ""' <<<"$ic")
+  wl_count=$(jq '.spec.integrations.argocd.clusterResourceWhitelist // [] | length' <<<"$ic")
+  bl_count=$(jq '.spec.integrations.argocd.namespaceResourceBlacklist // [] | length' <<<"$ic")
+
+  # These are no longer read from the IntegrationConfig, so a tenant whose
+  # AppProject carries them today loses both lists the moment the chart adopts it
+  # -- unless they are seeded into chart values first.
+  #
+  # Every row prints its state, including the good one: SEEDED means proceed,
+  # MISSING means stop, and the two need opposite actions. Warning only on
+  # mismatch makes a seeded cluster and a never-checked one look identical.
+  local ic_wl ic_bl chart_wl chart_bl chart_argo_ns seed_ok
+  ic_wl=$(resource_list_canonical "$(jq -c '.spec.integrations.argocd.clusterResourceWhitelist // []' <<<"$ic")" ic)
+  ic_bl=$(resource_list_canonical "$(jq -c '.spec.integrations.argocd.namespaceResourceBlacklist // []' <<<"$ic")" ic)
+  chart_wl=$(resource_list_canonical "$(chart_value defaultWhitelistJson)" chart)
+  chart_bl=$(resource_list_canonical "$(chart_value defaultBlacklistJson)" chart)
+  chart_argo_ns=$(chart_value argoNamespace)
+
+  heading "IntegrationConfig → chart values"
+  seed_row() {
+    # $1 field, $2 what the IC holds, $3 ic canonical, $4 chart canonical
+    local state
+    if [[ $3 == "$4" ]]; then
+      state=SEEDED
+    elif [[ $4 == '[]' || -z $4 ]]; then
+      state="MISSING  <-- STOP"
+    else
+      state="MISMATCH <-- STOP"
+    fi
+    printf '  %-34s %-24s %s\n' "$1" "$2" "$state"
+  }
+  seed_row argocd.namespace "${ic_argo_ns:-<unset>}" "$ic_argo_ns" "$chart_argo_ns"
+  seed_row argocd.clusterResourceWhitelist "$(plural "$wl_count" entry entries)" "$ic_wl" "$chart_wl"
+  seed_row argocd.namespaceResourceBlacklist "$(plural "$bl_count" entry entries)" "$ic_bl" "$chart_bl"
+  unset -f seed_row
+
+  seed_ok=yes
+  [[ $chart_wl == "$ic_wl" && $chart_bl == "$ic_bl" && $chart_argo_ns == "$ic_argo_ns" ]] || seed_ok=no
+  SEED_OK=$seed_ok
+
+  if [[ $seed_ok == yes ]]; then
+    printf '\n  All three are already in the release. No helm upgrade needed.\n'
+  else
+    # Compared by content, not by length: the same NUMBER of the wrong kinds is
+    # the failure this check exists to catch, and a count cannot see it.
+    warn "the chart's values do not match the IntegrationConfig's.
+         Cutting a tenant over now would rewrite its AppProject with the WRONG lists.
+         Run '$(self_invocation) values' and helm upgrade before going any further."
+    [[ $chart_argo_ns == "$ic_argo_ns" ]] || printf '  argocd.namespace\n    IntegrationConfig %s\n    chart             %s\n' "$ic_argo_ns" "$chart_argo_ns" >&2
+    [[ $chart_wl == "$ic_wl" ]] || printf '  clusterResourceWhitelist\n    IntegrationConfig %s\n    chart             %s\n' "$ic_wl" "$chart_wl" >&2
+    [[ $chart_bl == "$ic_bl" ]] || printf '  namespaceResourceBlacklist\n    IntegrationConfig %s\n    chart             %s\n' "$ic_bl" "$chart_bl" >&2
+  fi
+
+  local exts tenants appprojects
+  exts=$(extensions_json)
+  tenants=$(kc get "$TENANTS_GVR" -o json)
+  appprojects=$(appprojects_json "$argo_ns")
+
+  preflight_stops "$ic" "$appprojects" "$argo_ns"
+
+  # How many tenants still have work outstanding: either an Extensions CR is
+  # still there, or an AppProject exists that nothing has adopted yet. `Next`
+  # needs this to avoid printing a plan at a finished cluster.
+  PENDING_TENANTS=$(jq -r --argjson exts "$exts" --argjson aps "$appprojects" \
+      --arg ann "$annotation_key" --arg f "$optin_in" '
+    [ .items[] as $t
+      | (((($exts.items // [])[] | select(.spec.tenantName == $t.metadata.name)) // null)) as $e
+      | (((($aps.items  // [])[] | select(.metadata.name  == $t.metadata.name)) // null)) as $ap
+      | (($t.metadata[$f] // {})[$ann] == "true") as $in
+      | select($e != null or ($ap != null and ($in | not)))
+    ] | length' <<<"$tenants")
+
+  # Whether the two idempotent steps are already done, so the Next plan below can
+  # omit them rather than listing completed work as outstanding.
+  OWNERREFS_DONE=0
+  [[ -z $(legacy_owner_ref_names "$appprojects") ]] && OWNERREFS_DONE=1
+  OVERRIDES_DONE=0
+  [[ -z $(pending_override_annotations "$exts" "$tenants") ]] && OVERRIDES_DONE=1
+
+  heading "Tenants"
+  printf '  %-22s %-22s %-10s %-9s %s\n' TENANT EXTENSIONS APPPROJECT OPTED-IN NOTES
+  local tenant ext_name has_ap opted notes
+  while IFS=$'\t' read -r tenant ext_name has_ap opted notes; do
+    [[ -z $tenant ]] && continue
+    printf '  %-22s %-22s %-10s %-9s %s\n' "$tenant" "$ext_name" "$has_ap" "$opted" "$notes"
+  done < <(jq -r --argjson exts "$exts" --argjson aps "$appprojects" \
+             --arg ann "$annotation_key" --arg f "$optin_in" '
+    .items[] as $t
+    | (((($exts.items // [])[] | select(.spec.tenantName == $t.metadata.name)) // null)) as $e
+    | (((($aps.items  // [])[] | select(.metadata.name  == $t.metadata.name)) // null)) as $ap
+    | (($t.metadata[$f] // {})[$ann] == "true") as $in
+    | ($e.spec.argoCD.appProject // {}) as $cfg
+    | [
+        (if ($e.spec.argoCD.onDeletePurgeAppProject // false)
+           then "purge=true, patched to retain at handover" else empty end),
+        (if $cfg.sourceRepos != null then "sourceRepos override" else empty end),
+        (if $cfg.clusterResourceWhitelist != null then "whitelist override" else empty end),
+        (if $cfg.namespaceResourceBlacklist != null then "blacklist override" else empty end),
+        (if $ap == null and $e != null
+           then "NO AppProject: the controller never synced it" else empty end),
+        # An AppProject with no CR is two different situations, and calling both
+        # "orphan" makes a finished migration look like a problem.
+        (if $ap != null and $e == null and $in
+           then "done: chart-managed" else empty end),
+        (if $ap != null and $e == null and ($in | not)
+           then "orphan AppProject: no Extensions CR, adopted as-is at handover" else empty end),
+        (if $ap != null and (($ap.spec.sourceRepos // []) | length) == 0
+           then "no sourceRepos: deploys nothing, before or after" else empty end)
+      ] as $notes
+    | [ $t.metadata.name,
+        (if $e == null then "-" else $e.metadata.name end),
+        (if $ap == null then "-" else "yes" end),
+        (if $in then "yes" else "-" end),
+        ($notes | join("; "))
+      ] | @tsv' <<<"$tenants")
+
+  # An Extensions CR naming a tenant that does not exist never produced an
+  # AppProject and never will. It still holds the finalizer, so it still has to
+  # be deleted before the CRD can be removed.
+  local orphan_crs
+  orphan_crs=$(jq -r --argjson t "$tenants" '
+    [($t.items // [])[].metadata.name] as $names
+    | (.items // [])[]
+    | . as $cr
+    | ($cr.spec.tenantName) as $tn
+    | select($names | index($tn) == null)
+    | "  \($cr.metadata.name)  ->  tenantName=\($tn), no such Tenant"' <<<"$exts")
+  if [[ -n $orphan_crs ]]; then
+    heading "Extensions CRs naming a tenant that does not exist"
+    printf '%s\n' "$orphan_crs"
+    printf '\n  Delete these too. They hold the finalizer that blocks removing the CRD.\n'
+  fi
+
+  report_legacy_owner_refs "$appprojects" || true
+  report_gitops "$tenants" "$exts"
+  report_dead_v1beta2_argocd "$tenants"
+
+  # Two things this block must not do: hand out a plan when there is nothing to
+  # migrate, and print `--apply` on the two commands the GitOps section above may
+  # have just forbidden. A numbered list is read as instructions, and contradicting
+  # a warning four lines earlier means one of the two gets ignored.
+  heading "Next"
+  if [[ ${PENDING_TENANTS:-0} -eq 0 ]]; then
+    printf '  Nothing to migrate. Every tenant with an AppProject is chart-managed.\n\n'
+    return 0
+  fi
+
+  # Every step says what it CHANGES, and none carries --apply: a plan that hands
+  # you a mutating command before you have seen its dry run invites a write to a
+  # production AppProject nobody has reviewed.
+  printf '  migrate() { %s "$@"; }\n\n' "$(self_invocation)"
+  printf '  Each step below is a DRY RUN as written. Read its output, then add --apply\n'
+  printf '  where the step says you may.\n'
+  # Announced BEFORE the list. Printed inline where the omitted step would have
+  # been, it reads as a comment on whichever step precedes it.
+  local skipped=""
+  (( OVERRIDES_DONE )) && skipped="overrides already carried across"
+  if (( OWNERREFS_DONE )); then
+    [[ -n $skipped ]] && skipped="$skipped; no legacy ownerRefs remain" \
+                      || skipped="no legacy ownerRefs remain"
+  fi
+  # SEED_OK is yes/no, not 0/1 -- a (( )) test on it trips set -u.
+  if [[ ${SEED_OK:-no} == yes ]]; then
+    [[ -n $skipped ]] && skipped="$skipped; chart already seeded" \
+                      || skipped="chart already seeded"
+  fi
+  [[ -n $skipped ]] && printf '  Steps omitted because they are done: %s.\n' "$skipped"
+  printf '\n'
+
+  local n=1
+  step() {
+    # $1 command, $2 what it changes, $3 how to commit it
+    printf '  %d. migrate %s\n' "$n" "$1"
+    printf '        %s\n' "$2"
+    [[ -n ${3:-} ]] && printf '        %s\n' "$3"
+    printf '\n'
+    n=$((n+1))
+  }
+
+  if [[ ${SEED_OK:-no} != yes ]]; then
+    step "values > my-values.yaml" \
+      "writes nothing. Emits the chart values that must carry the IntegrationConfig's" \
+      "ArgoCD lists. Apply with helm upgrade, or commit them, before anything else."
+  fi
+
+  if (( OVERRIDES_DONE )); then
+    :
+  elif [[ ${GITOPS_TRACKED:-no} == yes ]]; then
+    step annotations \
+      "changes Tenants: adds the per-tenant overrides carried off the Extensions CRs." \
+      "Some Tenants are in Git -- it prints YAML for those. COMMIT it; --apply skips them."
+  else
+    step annotations \
+      "changes Tenants: adds the per-tenant overrides carried off the Extensions CRs." \
+      "Nothing renders differently until a tenant is opted in, so this is safe to apply first."
+  fi
+
+  if (( OWNERREFS_DONE )); then
+    :
+  else
+    step strip-owner-refs \
+      "changes AppProjects: removes legacy v1beta2 Tenant ownerRefs." \
+      "Those make the garbage collector delete an AppProject with its Tenant, overriding retain. AppProjects are not in Git, so --apply is the right way to do this."
+  fi
+
+
+  step "snapshot ./before-migration" \
+    "writes nothing to the cluster. Saves every AppProject to disk so step $((n+2)) can" \
+    "prove the migration changed only what it was supposed to."
+
+  if [[ ${GITOPS_TRACKED:-no} == yes ]]; then
+    step "handover <one tenant>" \
+      "THE MIGRATION. Retains the AppProject, deletes the Extensions CR, opts the tenant in." \
+      "Tenants are in Git -- COMMIT what it prints rather than applying. One tenant first, then verify."
+  else
+    step "handover <one tenant>" \
+      "THE MIGRATION. Retains the AppProject, deletes the Extensions CR, opts the tenant in." \
+      "Do ONE tenant, verify with step $((n+1)), then the rest."
+  fi
+
+  step "diff ./before-migration" \
+    "writes nothing. Compares live AppProjects against the snapshot." \
+    "Exactly two deltas are expected: the description, and roles[].groups gaining the tenant's users."
+
+  unset -f step
+}
+
+# -- values ------------------------------------------------------------------
+
+cmd_values() {
+  local ic
+  ic=$(integrationconfig_json)
+
+  # sourceRepos is deliberately absent: it was never in the IntegrationConfig --
+  # it is per-tenant, and comes across as an annotation from `annotations` below.
+  # Setting a chart-wide default is a separate change made after the diff is
+  # confirmed empty (MIGRATION.md, step 8).
+  jq -r '
+    def kinds(list):
+      if (list // []) | length == 0 then " []"
+      else "\n" + ((list) | map("    - group: \"\(.group)\"\n      kind: \"\(.kind)\"") | join("\n"))
+      end;
+    (.spec.integrations.argocd.namespace // "") as $ns
+    | "# Chart values seeded from IntegrationConfig \(.metadata.namespace)/\(.metadata.name).",
+      "#",
+      "# These three moved out of integrations.argocd, which the chart no longer reads.",
+      "# Install or upgrade with them BEFORE cutting any tenant over: adopting a tenant",
+      "# while the lists are unset rewrites its AppProject without them.",
+      "argocd:",
+      (if $ns == "" then
+         "  namespace: \"\"  # MISSING from the IntegrationConfig -- set this by hand"
+       else "  namespace: \($ns)" end),
+      "  clusterResourceWhitelist:" + kinds(.spec.integrations.argocd.clusterResourceWhitelist),
+      "  namespaceResourceBlacklist:" + kinds(.spec.integrations.argocd.namespaceResourceBlacklist)
+  ' <<<"$ic"
+}
+
+# -- annotations -------------------------------------------------------------
+
+cmd_annotations() {
+  load_chart_config
+
+  local exts
+  exts=$(extensions_json)
+
+  local tmp
+  tmp=$(mktemp)
+  cleanup_add "$tmp"
+
+  # onDeletePurgeAppProject is carried across even though it has no effect today
+  # (TOV2-1). A tenant that opted into purge should keep saying so, or the intent
+  # is silently lost the day retain becomes enforceable.
+  #
+  # `!= null` rather than a truthiness test throughout: an Extensions CR that sets
+  # a list to [] means "override with empty", which is a different thing from
+  # leaving it unset, and skipping it would silently restore the chart default.
+  jq -r \
+    --arg kr "$(chart_value annotationSourceRepos)" \
+    --arg kw "$(chart_value annotationClusterResourceWhitelist)" \
+    --arg kb "$(chart_value annotationNamespaceResourceBlacklist)" \
+    --arg kp "$(chart_value annotationOnDeletePurge)" '
+    (.items // [])[]
+    | .spec.tenantName as $t
+    | (.spec.argoCD.appProject // {}) as $ap
+    | [
+        (if $ap.sourceRepos != null                then [$t, $kr, ($ap.sourceRepos | tojson)] else empty end),
+        (if $ap.clusterResourceWhitelist != null   then [$t, $kw, ($ap.clusterResourceWhitelist | tojson)] else empty end),
+        (if $ap.namespaceResourceBlacklist != null then [$t, $kb, ($ap.namespaceResourceBlacklist | tojson)] else empty end),
+        (if (.spec.argoCD.onDeletePurgeAppProject // false) then [$t, $kp, "true"] else empty end)
+      ][]
+    | @tsv' <<<"$exts" >"$tmp"
+
+  if [[ ! -s $tmp ]]; then
+    printf 'No per-tenant overrides on any Extensions CR: every tenant inherits the\n'
+    printf 'chart defaults, and there is nothing to carry across.\n'
+    return
+  fi
+
+  printf 'Per-tenant overrides carried across from the Extensions CRs.\n'
+  printf 'An absent annotation inherits the chart default; an explicit [] overrides with\n'
+  printf 'empty. Both appear below, because they mean different things.\n\n'
+
+  # Which of these tenants are applied from Git. The output shape follows the
+  # answer: a Git-managed Tenant gets YAML to commit, not a kubectl command whose
+  # JSON a human would have to hand-translate back into a manifest.
+  local tracked_tenants
+  tracked_tenants=$(tracked_names "$(kc get "$TENANTS_GVR" -o json)")
+
+  is_tracked() {
+    local t=$1 x
+    while IFS= read -r x; do [[ $x == "$t" ]] && return 0; done <<<"$tracked_tenants"
+    return 1
+  }
+
+  # Two passes, not one interleaved stream. On a mixed fleet a single pass emits
+  # YAML, then a kubectl line, then more YAML, in whatever order the API returned
+  # the CRs -- the wrong shape for "which do I commit and which do I run".
+  local tenant key value last_yaml_tenant="" last_cmd_tenant=""
+  local wrote_kubectl=0 wrote_yaml=0
+
+  # Count distinct tenants per group first, so each header can say how many it
+  # covers.
+  local yaml_count=0 kubectl_count=0 t
+  while IFS= read -r t; do
+    [[ -z $t ]] && continue
+    if is_tracked "$t"; then yaml_count=$((yaml_count+1)); else kubectl_count=$((kubectl_count+1)); fi
+  done < <(cut -f1 "$tmp" | sort -u)
+
+  # -- pass 1: the Git-managed ones, as YAML to commit
+  while IFS=$'\t' read -r tenant key value; do
+    [[ -z $tenant ]] && continue
+    is_tracked "$tenant" || continue
+    if [[ $tenant != "$last_yaml_tenant" ]]; then
+      if (( wrote_yaml )); then printf '\n'; else
+        heading "COMMIT THESE  ($(plural "$yaml_count" tenant tenants) applied from Git)"
+        printf '%s\n' "-------------------------------------------------------------"
+      fi
+      printf '  # %s\n' "$tenant"
+      printf '  metadata:\n    annotations:\n'
+      last_yaml_tenant=$tenant
+      wrote_yaml=1
+    fi
+    printf '      %s: %s\n' "$key" "$(yaml_squote "$value")"
+  done <"$tmp"
+
+  # The footer belongs HERE, not after both passes: on a mixed fleet a trailing
+  # footer explains the COMMIT block from below the APPLY block, where it reads as
+  # instructions for the kubectl commands and says the opposite of what it means.
+  if (( wrote_yaml )); then
+    printf '\n  Merge each block into that Tenant'"'"'s manifest under metadata.annotations.\n'
+    printf '  --apply will NOT write these: a sync would revert it, and reverting the\n'
+    printf "  opt-in annotation deletes that tenant's AppProject.\n"
+  fi
+
+  # -- pass 2: the rest, as commands
+  while IFS=$'\t' read -r tenant key value; do
+    [[ -z $tenant ]] && continue
+    is_tracked "$tenant" && continue
+    if ! (( wrote_kubectl )); then
+      heading "APPLY THESE  ($(plural "$kubectl_count" tenant tenants) not managed from Git)"
+      printf '%s\n' "-------------------------------------------------------------"
+      wrote_kubectl=1
+    fi
+    # Grouped per tenant, like the COMMIT section above.
+    if [[ $tenant != "$last_cmd_tenant" ]]; then
+      printf '\n  # %s\n' "$tenant"
+      last_cmd_tenant=$tenant
+    fi
+    run kc annotate "$TENANTS_GVR" "$tenant" "$key=$value" --overwrite
+  done <"$tmp"
+
+  unset -f is_tracked
+
+  if (( wrote_kubectl )) && ! (( APPLY )); then
+    printf '\nRe-run with --apply to write the kubectl ones.\n'
+  fi
+}
+
+# -- legacy ownerRefs --------------------------------------------------------
+
+# Returns 0 when at least one AppProject is affected, so callers can branch.
+report_legacy_owner_refs() {
+  local affected
+  affected=$(legacy_owner_ref_names "$1")
+  [[ -n $affected ]] || return 1
+
+  heading "AppProjects carrying a legacy $LEGACY_OWNER_APIVERSION Tenant ownerRef"
+  printf '%s\n' "$affected" | sed 's/^/  /'
+  cat <<EOF
+
+  This is a CONTROLLER ownerRef, so the garbage collector deletes the AppProject
+  when its Tenant goes away -- overriding any retain setting, now or later.
+  ExtensionsArgoCDReconciler stripped it on every reconcile; nothing strips it
+  once that controller is gone.
+
+  Strip them with: $(self_invocation) strip-owner-refs --apply
+EOF
+}
+
+# -- preflight: things that change the whole procedure -----------------------
+
+# tracked_names lists objects carrying ArgoCD's tracking metadata: the
+# `app.kubernetes.io/instance` label (default trackingMethod) or the
+# `argocd.argoproj.io/tracking-id` annotation (trackingMethod: annotation).
+# ArgoCD stamps one or the other on everything it syncs.
+tracked_names() {
+  jq -r '
+    (.items // [])[]
+    | select(((.metadata.labels // {})["app.kubernetes.io/instance"] != null)
+          or ((.metadata.annotations // {})["argocd.argoproj.io/tracking-id"] != null))
+    | .metadata.name' <<<"$1"
+}
+
+# is_tracked_one answers the same question as tracked_names for ONE named object.
+is_tracked_one() {
+  local gvr=$1 name=$2
+  [[ -n $name ]] || return 1
+  tracked_names "$(kc get "$gvr" "$name" -o json 2>/dev/null | jq '{items:[.]}' 2>/dev/null || echo '{"items":[]}')" \
+    | grep -qx "$name"
+}
+
+# emit_optin_yaml prints the opt-in as YAML at a given indent.
+emit_optin_yaml() {
+  local key=$1 mode=$2 pad=${3:-'       '}
+  if [[ $mode == OnLabel ]]; then
+    printf '%smetadata:\n%s  labels:\n%s    %s: "true"\n' "$pad" "$pad" "$pad" "$key"
+  else
+    printf '%smetadata:\n%s  annotations:\n%s    %s: "true"\n' "$pad" "$pad" "$pad" "$key"
+  fi
+}
+
+# report_gitops decides whether the annotations this migration writes belong in
+# Git rather than in kubectl. It ALWAYS prints, including when it finds nothing:
+# tracking metadata is a positive signal only, so silence here would read as
+# "not GitOps-managed" when it really means "could not tell".
+report_gitops() {
+  local tenants=$1 exts=$2
+  local tracked_tenants tracked_exts
+  tracked_tenants=$(tracked_names "$tenants")
+  tracked_exts=$(tracked_names "$exts")
+
+  heading "GitOps"
+  # Read by `Next`, which must not print `--apply` on the two commands the branch
+  # below is about to forbid.
+  if [[ -n $tracked_tenants || -n $tracked_exts ]]; then GITOPS_TRACKED=yes; else GITOPS_TRACKED=no; fi
+  if [[ -n $tracked_tenants || -n $tracked_exts ]]; then
+    printf '  Tenants and/or Extensions carry ArgoCD tracking metadata:\n'
+    if [[ -n $tracked_tenants ]]; then
+      printf '%s\n' "$tracked_tenants" | sed 's|^|    tenant/|'
+    fi
+    if [[ -n $tracked_exts ]]; then
+      printf '%s\n' "$tracked_exts" | sed 's|^|    extensions/|'
+    fi
+    cat <<EOF
+
+  Every write this migration makes to a Tenant or an Extensions CR must be a
+  COMMIT, not a kubectl command. The opt-in annotation decides whether a tenant
+  has an AppProject at all; set it out of band and a sync can take it away
+  again -- which deletes that AppProject.
+
+  Do NOT use --apply on 'annotations' or 'handover'. Use their dry-run output to
+  write the manifests instead. See MIGRATION.md, "If your Tenants come from Git".
+EOF
+  else
+    cat <<EOF
+  No ArgoCD tracking metadata found on any Tenant or Extensions CR.
+
+  That is NOT proof they are unmanaged -- tracking can be configured off, and
+  other GitOps tools leave no marker at all. Confirm by hand before using
+  --apply: if these objects come from Git, every write below has to be a commit.
+EOF
+  fi
+}
+
+# preflight_stops holds the two conditions that make the migration unsafe rather
+# than merely surprising. Shared with `run`: a hard stop that only fires in a
+# command you were told to run first is not a hard stop. Silent when both pass.
+preflight_stops() {
+  local ic=$1 appprojects=$2 argo_ns=$3
+  local ic_argo_ns tracked_aps
+
+  # A second set of AppProjects in a different namespace is not adoption, and
+  # every later signal would be wrong too: the snapshot would be empty, every
+  # tenant would read as "NO AppProject", and the diff would compare nothing.
+  ic_argo_ns=$(jq -r '.spec.integrations.argocd.namespace // ""' <<<"$ic")
+  if [[ -n $ic_argo_ns && -n $argo_ns && $ic_argo_ns != "$argo_ns" ]]; then
+    die "argocd.namespace mismatch: the chart renders into '$argo_ns', the
+       IntegrationConfig names '$ic_argo_ns'. Adoption depends on the chart writing to
+       the same namespace the controller wrote to.
+       Reinstall with --set argocd.namespace=$ic_argo_ns."
+  fi
+
+  # An AppProject under GitOps is a different, worse problem: two writers for an
+  # object this chart renders. Under sync.mode=strict the chart's webhook will
+  # deny those syncs, and the migration is not the thing to fix first.
+  tracked_aps=$(tracked_names "$appprojects")
+  if [[ -n $tracked_aps ]]; then
+    heading "STOP: AppProjects appear to be GitOps-managed"
+    printf '%s\n' "$tracked_aps" | sed 's/^/  /'
+    cat <<EOF
+
+  These carry ArgoCD tracking metadata, so something in Git is applying them.
+  This chart renders AppProjects too, and under sync.mode=strict its webhook
+  denies any other writer -- so those syncs will start failing.
+
+  Remove the AppProject manifests from Git before migrating. They are generated
+  objects; nobody should be authoring them.
+EOF
+    die "AppProjects are managed from Git. Resolve that first."
+  fi
+}
+
+# report_dead_v1beta2_argocd finds Tenants authored as v1beta2 with a spec.argocd
+# block. Nothing reads it -- the v1beta2 -> v1beta3 conversion drops it silently
+# -- so it cannot be read off the live object. last-applied-configuration is the
+# only place the original intent survives, and only for objects applied with
+# kubectl or a client-side-apply GitOps sync.
+report_dead_v1beta2_argocd() {
+  local dead
+  dead=$(jq -r '
+    (.items // [])[]
+    | . as $t
+    | (($t.metadata.annotations // {})["kubectl.kubernetes.io/last-applied-configuration"] // "") as $lac
+    | select($lac != "")
+    | ($lac | fromjson? // {}) as $orig
+    | select(($orig.apiVersion // "") | test("v1beta2$"))
+    | select($orig.spec.argocd != null)
+    | "  \($t.metadata.name)"' <<<"$1")
+  [[ -n $dead ]] || return 0
+
+  heading "Tenants authored as v1beta2 with a spec.argocd block"
+  printf '%s\n' "$dead"
+  cat <<EOF
+
+  Nothing reads that block, and nothing has for years: the v1beta2 -> v1beta3
+  conversion drops it silently. It records intent that was never in effect.
+
+  Do not carry it across as though it were current configuration. If one of
+  these tenants has an AppProject anyway, find out what created it before
+  adopting it.
+EOF
+}
+
+legacy_owner_ref_names() {
+  jq -r --arg av "$LEGACY_OWNER_APIVERSION" --arg k "$LEGACY_OWNER_KIND" '
+    (.items // [])[]
+    | select([(.metadata.ownerReferences // [])[]
+        | select(.apiVersion == $av and .kind == $k)] | length > 0)
+    | .metadata.name' <<<"$1"
+}
+
+# Takes tenant names, like handover does, to keep the one-tenant-at-a-time
+# discipline: stripping the ownerRef off a tenant you have not chosen to touch is
+# a change to an AppProject the OLD controller still owns, and it means a Tenant
+# deleted before its migration leaves an orphan instead of a collected object.
+#
+# No arguments means every AppProject -- the fleet-wide cleanup at the end of a
+# migration -- and it says so and lists them first.
+cmd_strip_owner_refs() {
+  load_chart_config
+  local argo_ns appprojects
+  argo_ns=$(chart_value argoNamespace)
+  [[ -n $argo_ns ]] || die "the chart's argocd.namespace is empty; refusing to patch a guessed namespace"
+  appprojects=$(appprojects_json "$argo_ns")
+
+  if (( $# )); then
+    # Fail on a name that has no AppProject rather than silently doing nothing:
+    # a typo would otherwise read as "already clean".
+    local want t found
+    want=$(printf '%s\n' "$@")
+    for t in "$@"; do
+      found=$(jq -r --arg n "$t" '[(.items // [])[] | select(.metadata.name == $n)] | length' <<<"$appprojects")
+      [[ $found == 0 ]] && die "no AppProject named $t in $argo_ns. Check the tenant name."
+    done
+    appprojects=$(jq --argjson w "$(jq -Rn --arg s "$want" '$s | rtrimstr("\n") | split("\n")')" \
+      '{items: [(.items // [])[] | select(.metadata.name as $n | $w | index($n))]}' <<<"$appprojects")
+  fi
+
+  if ! report_legacy_owner_refs "$appprojects"; then
+    if (( $# )); then
+      printf 'None of the named AppProjects carries a legacy ownerRef. Nothing to do.\n'
+    else
+      printf 'No AppProject in %s carries a legacy ownerRef. Nothing to do.\n' "$argo_ns"
+    fi
+    return
+  fi
+
+  heading "Stripping"
+  # A JSON-merge patch that replaces the whole ownerReferences list, computed per
+  # object from what is on it now. A JSON-pointer patch on a list index would
+  # race anything else writing the object between the read and the write.
+  local name patch
+  while read -r name; do
+    [[ -z $name ]] && continue
+    patch=$(jq -c --arg av "$LEGACY_OWNER_APIVERSION" --arg k "$LEGACY_OWNER_KIND" --arg n "$name" '
+      (.items // [])[] | select(.metadata.name == $n)
+      | {metadata: {ownerReferences:
+          [(.metadata.ownerReferences // [])[]
+            | select((.apiVersion == $av and .kind == $k) | not)]}}' <<<"$appprojects")
+    run kc patch "$APPPROJECTS_GVR" "$name" -n "$argo_ns" --type=merge -p "$patch"
+  done < <(legacy_owner_ref_names "$appprojects")
+
+  (( APPLY )) || printf '\nRe-run with --apply to write these.\n'
+}
+
+# -- snapshot and diff -------------------------------------------------------
+
+# normalise strips everything that churns for reasons unrelated to content, so a
+# diff after migration shows behaviour changes and nothing else.
+#
+# destinations are sorted because they come from an API-server LIST, so their
+# order is not stable and carries no meaning. Roles and the groups inside them
+# are NOT sorted: group order is load-bearing, and sorting it would hide a real
+# change. jwtTokens are dropped because ArgoCD writes them into the spec and they
+# move whenever someone mints a token.
+normalise_appproject() {
+  jq -S '{
+    name: .metadata.name,
+    spec: (.spec
+      | .destinations = ((.destinations // []) | sort_by(.server, .namespace))
+      | if has("roles") then .roles = [(.roles // [])[] | del(.jwtTokens)] else . end)
+  }'
+}
+
+appproject_names() {
+  kc get "$APPPROJECTS_GVR" -n "$1" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+}
+
+# restorable_appproject strips the fields the API server owns or rejects on
+# create, and keeps everything else -- including jwtTokens, which normalise
+# deliberately drops. The normalised file is for COMPARING; this one is for
+# putting the object back, which is what every "restore from the snapshot"
+# instruction in this script and in MIGRATION.md depends on. They are different
+# jobs and cannot be the same file.
+restorable_appproject() {
+  # Built by naming what to KEEP: a del()-based filter would silently start
+  # leaking whichever server-owned field a future API version adds.
+  jq --arg gv "$APPPROJECT_APIVERSION" --arg k "$APPPROJECT_KIND" '
+    (.metadata.labels // {}) as $labels
+    | ((.metadata.annotations // {})
+        | with_entries(select(.key != "kubectl.kubernetes.io/last-applied-configuration"))) as $anns
+    | {
+        apiVersion: (.apiVersion // $gv),
+        kind:       (.kind // $k),
+        metadata: ({name: .metadata.name, namespace: .metadata.namespace}
+          + (if ($labels | length) > 0 then {labels: $labels} else {} end)
+          + (if ($anns   | length) > 0 then {annotations: $anns} else {} end)),
+        spec: .spec,
+      }'
+}
+
+cmd_snapshot() {
+  local dir=${1:-}
+  [[ -n $dir ]] || die "snapshot needs a directory: $0 snapshot ./before-migration"
+  load_chart_config
+  local argo_ns
+  argo_ns=$(chart_value argoNamespace)
+  [[ -n $argo_ns ]] || die "the chart's argocd.namespace is empty; refusing to snapshot a guessed namespace"
+
+  # Captured, and fatal on failure, rather than streamed from process
+  # substitution: there a failed LIST feeds the loop nothing, `set -e` never
+  # fires, and the result is an exit-0 snapshot of 0 objects standing in as the
+  # migration's only rollback record.
+  local names
+  names=$(appproject_names "$argo_ns") \
+    || die "listing AppProjects in $argo_ns failed; refusing to write a snapshot that
+       may be missing objects."
+
+  mkdir -p "$dir/restore"
+  local count=0 name raw
+  raw=$(mktemp)
+  cleanup_add "$raw"
+  while read -r name; do
+    [[ -z $name ]] && continue
+    kc get "$APPPROJECTS_GVR" "$name" -n "$argo_ns" -o json >"$raw"
+    normalise_appproject <"$raw" >"$dir/$name.json"
+    restorable_appproject <"$raw" >"$dir/restore/$name.json"
+    count=$((count + 1))
+  done <<<"$names"
+
+  # 0 objects while Extensions CRs still exist is not an empty cluster; it is a
+  # wrong namespace wearing an empty cluster's clothes.
+  if (( count == 0 )); then
+    local remaining
+    remaining=$(jq '(.items // []) | length' <<<"$(extensions_json)")
+    (( remaining == 0 )) \
+      || die "found no AppProjects in $argo_ns, but $remaining Extensions CR(s) exist.
+       A snapshot of nothing cannot be the rollback record for a migration of
+       something. Check argocd.namespace before retrying."
+  fi
+
+  # The marker, not the directory, is what `run` reads: mkdir happens before the
+  # first object is written, so a snapshot that dies partway leaves the directory
+  # behind and would otherwise tick "snapshot taken" with no rollback record.
+  : >"$dir/.complete"
+
+  printf 'Wrote %d AppProject(s) from %s:\n' "$count" "$argo_ns"
+  printf '  %s/          normalised, for `%s diff`\n' "$dir" "$(self_invocation)"
+  printf '  %s/restore/  applyable as-is, tokens included, if one has to go back\n' "$dir"
+  printf '\nThis is the only record of what the controller produced. Keep it until the\n'
+  printf 'migration is signed off.\n'
+}
+
+cmd_diff() {
+  local dir=${1:-}
+  [[ -n $dir ]] || die "diff needs the snapshot directory: $0 diff ./before-migration"
+  [[ -d $dir ]] || die "no such snapshot directory: $dir"
+  load_chart_config
+  local argo_ns
+  argo_ns=$(chart_value argoNamespace)
+  [[ -n $argo_ns ]] || die "the chart's argocd.namespace is empty; refusing to diff a guessed namespace"
+
+  cat <<'EOF'
+Comparing live AppProjects against the snapshot. Exactly two deltas are expected
+for a tenant that has been cut over, and anything else needs an explanation
+before you continue:
+
+  - spec.description   "Managed by Extensions controller"
+                    -> "Managed by mto-extension-argocd"
+
+  - spec.roles[].groups gains that tenant's USERS, appended after its groups.
+    This is the deliberate fix: MTO's generated group only resolves where
+    syncOCPGroups has run, so a tenant whose owners are users had no ArgoCD
+    access at all.
+
+And one more, only for a tenant whose namespace list already contains the ArgoCD
+namespace: a DUPLICATE destination disappears. The old controller appended the
+ArgoCD namespace without checking whether the label selector had already found
+it; the chart checks. ArgoCD treats the two as one either way.
+
+A tenant not yet cut over must show no diff whatsoever.
+EOF
+
+  local tmp
+  tmp=$(mktemp -d)
+  cleanup_add "$tmp"
+
+  # GONE is declared only on a confirmed NotFound. A transient read failure that
+  # reads as GONE tells the operator to apply the restore copy over an object
+  # that still exists -- rolling a live, chart-managed AppProject back in time.
+  local changed=0 gone=0 added=0 name f live
+  for f in "$dir"/*.json; do
+    [[ -e $f ]] || break
+    name=$(basename "$f" .json)
+    live=$(kc get "$APPPROJECTS_GVR" "$name" -n "$argo_ns" -o json --ignore-not-found) \
+      || die "reading AppProject/$name failed. That is NOT the same as it being gone --
+       fix cluster access and re-run the diff before acting on anything."
+    if [[ -z $live ]]; then
+      heading "$name -- GONE"
+      printf '  In the snapshot, not on the cluster. A migration must never delete an\n'
+      printf '  AppProject. Put it back and stop:\n'
+      printf '    kubectl apply -f %s/restore/%s.json\n' "$dir" "$name"
+      gone=$((gone + 1))
+      continue
+    fi
+    normalise_appproject <<<"$live" >"$tmp/now.json"
+    if ! diff -u "$f" "$tmp/now.json" >"$tmp/out.diff"; then
+      heading "$name"
+      sed '1,2d' "$tmp/out.diff" | sed 's/^/  /'
+      changed=$((changed + 1))
+    fi
+  done
+
+  # Captured, not process-substituted: a failed LIST here would silently turn
+  # off NEW-object detection.
+  local live_names
+  live_names=$(appproject_names "$argo_ns") \
+    || die "listing AppProjects in $argo_ns failed; cannot check for NEW objects."
+  while read -r name; do
+    [[ -z $name ]] && continue
+    if [[ ! -e "$dir/$name.json" ]]; then
+      heading "$name -- NEW"
+      printf '  On the cluster, not in the snapshot. Expected only for a tenant that had\n'
+      printf '  no AppProject before it was cut over.\n'
+      added=$((added + 1))
+    fi
+  done <<<"$live_names"
+
+  heading "Summary"
+  printf '  %d changed, %d new, %d missing\n\n' "$changed" "$added" "$gone"
+  (( gone == 0 )) \
+    || die "an AppProject that existed before the migration is gone. Stop here and read
+       MIGRATION.md, Rolling back."
+}
+
+# appproject_tokens lists the role/token-id pairs on ONE AppProject object, or
+# nothing. Empty input is not an error: callers ask "is there a credential to
+# lose", and "there is no object" answers no.
+appproject_tokens() {
+  [[ -n ${1:-} ]] || return 0
+  jq -r '[.spec.roles[]? | select((.jwtTokens // []) | length > 0)
+          | "\(.name) / \((.jwtTokens | map(.id // "<no id>")) | join(", "))"] | .[]' \
+    <<<"$1" 2>/dev/null || true
+}
+
+# print_token_loss_warning is the one warning here that costs a credential when it
+# is missed, so it lives in one place and is called from both `handover` and `run`
+# -- the latter being the only command a GitOps fleet ever uses. See TOV2-10 in
+# docs/upstream-issues.md.
+print_token_loss_warning() {
+  local tenant=$1 argo_ns=$2 tokens=$3
+  local save_file="./appproject-$tenant-before.json"
+  # Deliberately plain echo lines: nesting printf format strings around JSON, jq
+  # programs and apostrophes is how one mismatched quote makes the whole script
+  # unparseable, and a warning about losing credentials is the last place for it.
+  echo "  WARNING  these ArgoCD role tokens stop working when the chart adopts"
+  printf "%s\n" "$tokens" | sed "s/^/             /"
+  echo
+  echo "           The AppProject stores a record saying the token is valid, not"
+  echo "           the token itself -- only your CI has that. Adoption drops the"
+  echo "           record, so ArgoCD starts rejecting a token CI still holds."
+  echo
+  echo "           SAVE IT FIRST:"
+  echo "             kube get appproject $tenant -n $argo_ns -o json > $save_file"
+  echo
+  echo "           TWO WAYS FORWARD. Neither is permanent -- see the last line."
+  echo
+  echo "           A. Put the old record back. The token your CI already holds"
+  echo "              starts working again; nothing in CI changes."
+  echo "                jq \"{spec:{roles:[.spec.roles[]|select(.jwtTokens)|{name,jwtTokens}]}}\" \\"
+  echo "                  $save_file > restore-tokens.json"
+  echo "                kube patch appproject $tenant -n $argo_ns --type=merge \\"
+  echo "                  --patch-file restore-tokens.json"
+  echo
+  echo "           B. Mint a fresh token and update the pipeline that uses it."
+  echo "              Slower, but you choose when the old one stops working."
+  echo "                argocd proj role create-token $tenant <role>"
+  echo "              then store the printed token wherever CI reads it from."
+  echo
+  echo "           Either way it goes again at the next real change to this tenant"
+  echo "           -- a namespace added or removed, the Tenant edited, the"
+  echo "           IntegrationConfig changed, or a chart upgrade. Each of those"
+  echo "           re-renders the AppProject and drops the record with it."
+  echo
+}
+
+# -- handover ----------------------------------------------------------------
+
+cmd_handover() {
+  (( $# > 0 )) || die "handover needs at least one tenant name"
+  load_chart_config
+
+  local argo_ns scaffolding_mode key
+  argo_ns=$(chart_value argoNamespace)
+  scaffolding_mode=$(chart_value scaffoldingMode)
+  case $scaffolding_mode in
+    OnAnnotation) key=$(chart_value scaffoldingAnnotationKey) ;;
+    OnLabel)      key=$(chart_value scaffoldingLabelKey) ;;
+    *) die "scaffolding.mode is $scaffolding_mode, so there is no per-tenant opt-in to
+       set. Migration has to be tenant by tenant: reinstall with OnAnnotation." ;;
+  esac
+
+  [[ -n $argo_ns ]] || die "the chart's argocd.namespace is empty; cannot confirm AppProject survival"
+
+  local exts tenant ext_name purge confirm_val terr survivor
+  local did_writable_work=0
+  exts=$(extensions_json)
+
+  if ! (( APPLY )); then
+    heading "Run these yourself, in order. Nothing below has been executed."
+    printf '  kube() { kubectl%s "$@"; }\n' "${CONTEXT:+ --context=$CONTEXT}"
+  fi
+
+  # Numbered so the output reads as an ordered procedure, and so a person can say
+  # "it stopped at 3".
+  local step
+  stepline() { step=$((step+1)); printf '  %d. %s\n' "$step" "$*"; }
+  # The two objects are separate decisions with separate owners -- the Extensions
+  # CR is drained, the Tenant is opted in -- so one headed block each, with steps
+  # numbered continuously across both so it is still one ordered list.
+  subhead() { printf '\n  %s\n  %s\n' "$1" "----------------------------------------------------------"; }
+
+  for tenant in "$@"; do
+    heading "$tenant"
+    step=0
+
+    if ! terr=$(kc get "$TENANTS_GVR" "$tenant" 2>&1 >/dev/null); then
+      die "cannot read Tenant $tenant: ${terr:-kubectl gave no error text}"
+    fi
+
+    ext_name=$(jq -r --arg t "$tenant" '
+      (.items // [])[] | select(.spec.tenantName == $t) | .metadata.name' <<<"$exts" | head -1)
+
+    # Tokens, before anything is written. Adoption applies spec.roles, an ATOMIC
+    # list on the AppProject CRD, so the whole list is replaced and
+    # roles[].jwtTokens -- which this chart never renders -- goes with it.
+    # sync.ignoreFields exempts the path from the webhook and from drift but not
+    # from the apply, so the exemption does not save it (TOV2-10).
+    #
+    # A warning, not a refusal, because it is recoverable: the jwtTokens entry is
+    # the validity record ArgoCD checks (iat/id), not the secret, so re-applying
+    # it re-validates the original token. `snapshot` keeps a copy under restore/.
+    # Silence is the bug -- `diff` normalises jwtTokens away, so nothing else
+    # would ever mention them.
+    #
+    # Both branches below need to know whether the Tenant comes from Git, so
+    # resolve it once here.
+    local tenant_tracked_pre=0
+    is_tracked_one "$TENANTS_GVR" "$tenant" && tenant_tracked_pre=1
+
+    # Warnings go FIRST and gate --apply: a caveat printed after the plan is a
+    # caveat read after the decision.
+    #
+    # The UID comes off the same read. "The object still exists" is not the claim
+    # this procedure makes -- MIGRATION.md promises "same UID, no gap" -- and a
+    # delete-and-recreate satisfies the first while breaking the second: the role
+    # tokens are gone and every ownerRef naming the old UID dangles. An empty
+    # answer here is also how "the controller never synced one" is recognised.
+    local tokens live_before uid_before
+    live_before=$(kc get "$APPPROJECTS_GVR" "$tenant" -n "$argo_ns" -o json 2>/dev/null || true)
+    uid_before=''
+    [[ -n $live_before ]] && uid_before=$(jq -r '.metadata.uid // ""' <<<"$live_before")
+    tokens=$(appproject_tokens "$live_before")
+    if [[ -n $tokens ]]; then
+      print_token_loss_warning "$tenant" "$argo_ns" "$tokens"
+      if (( APPLY )); then
+        confirm "Continue? The token records above will be dropped." \
+          || die "stopped at $tenant. Nothing was changed."
+      fi
+    fi
+
+    if [[ -n $ext_name ]]; then
+      purge=$(jq -r --arg n "$ext_name" '
+        (.items // [])[] | select(.metadata.name == $n)
+        | .spec.argoCD.onDeletePurgeAppProject // false' <<<"$exts")
+
+      # An Extensions CR applied from Git must not be deleted with kubectl: the
+      # next sync recreates it, and if the retain patch was also made out of band
+      # the recreated CR brings purge=true back and the NEXT prune destroys the
+      # AppProject. ArgoCD's prune is the correct deleter -- it honours the
+      # finalizer exactly like kubectl, so the controller's retain branch runs.
+      #
+      # The ordering cannot be collapsed: deleting the file is not a change to the
+      # field, so a single commit removing the CR leaves purge at whatever last
+      # landed. Two commits, in this order.
+      local ext_tracked=0
+      is_tracked_one "$EXTENSIONS_GVR" "$ext_name" && ext_tracked=1
+
+      if (( ext_tracked )); then
+        subhead "EXTENSIONS CR  --  $ext_name, applied from Git"
+        stepline "COMMIT: set onDeletePurgeAppProject: false on $ext_name, and let it sync."
+        if [[ $purge == true ]]; then
+          printf '     It is true right now. Deleting the CR while it is true destroys\n'
+          printf '     AppProject/%s. Confirm the commit landed with:\n' "$tenant"
+          printf '       kube get %s %s -o jsonpath=%s\n' \
+            "$EXTENSIONS_GVR" "$ext_name" "'{.spec.argoCD.onDeletePurgeAppProject}'"
+        else
+          printf '     Already false, so this commit is a no-op -- skip it.\n'
+        fi
+        stepline "COMMIT: git rm the manifest for $ext_name."
+        printf '     ArgoCD prunes it, the old controller releases its finalizer, and\n'
+        printf '     AppProject/%s is retained. Do NOT kubectl delete it: the next sync\n' "$tenant"
+        printf '     would put it straight back.\n'
+
+        # Named up front, with its reason, because what is still to come is the
+        # one write that decides whether the tenant has an AppProject at all.
+        if (( tenant_tracked_pre )); then
+          subhead "TENANT CR  --  $tenant, applied from Git    [NOT YET]"
+        else
+          subhead "TENANT CR  --  $tenant, applied by hand     [NOT YET]"
+        fi
+        printf '     Opting in before the CR is gone puts two writers on the same\n'
+        printf '     AppProject. Re-run this once the commits above have synced.\n\n'
+        if (( tenant_tracked_pre )); then
+          stepline "COMMIT the opt-in on Tenant/$tenant:"
+          emit_optin_yaml "$key" "$scaffolding_mode" '       '
+        else
+          stepline "opt Tenant/$tenant in (not from Git, so kubectl is fine):"
+          printf '     kube annotate %s %s %s=true --overwrite\n' "$TENANTS_GVR" "$tenant" "$key"
+        fi
+        stepline "wait for the chart to adopt AppProject/$tenant and verify."
+        continue
+      fi
+      did_writable_work=1
+      subhead "EXTENSIONS CR  --  $ext_name, applied by hand"
+
+      # Retain first, and as its own write. Deleting a CR whose purge is true
+      # destroys the live AppProject -- the one outcome this procedure exists to
+      # prevent -- so it is re-read and confirmed below rather than assumed from a
+      # successful patch.
+      if [[ $purge == true ]]; then
+        stepline "disarm purge on $ext_name (deleting it while true destroys the AppProject)"
+        run kc patch "$EXTENSIONS_GVR" "$ext_name" --type=merge \
+          -p '{"spec":{"argoCD":{"onDeletePurgeAppProject":false}}}'
+        if (( APPLY )); then
+          confirm_val=$(kc get "$EXTENSIONS_GVR" "$ext_name" \
+            -o jsonpath='{.spec.argoCD.onDeletePurgeAppProject}')
+          [[ $confirm_val == false ]] \
+            || die "$ext_name still reports onDeletePurgeAppProject='$confirm_val'.
+       Refusing to delete it: that would destroy AppProject/$tenant."
+          # etcd holding the new value is not enough. ExtensionsArgoCDReconciler
+          # reads through controller-runtime's cache, so a reconcile already in
+          # flight can hand handleDeletion the PRE-patch spec -- purge still
+          # true -- and delete the AppProject anyway. Narrow race, worst outcome.
+          #
+          # The observable proof that it has processed the new generation is its
+          # own status write: updateArgoCDConfigStatus stamps a fresh
+          # LastTransitionTime on every successful sync. Wait for one dated after
+          # the patch. It doubles as the liveness check the delete depends on.
+          wait_for_controller_observation "$ext_name" || die "\
+       $ext_name was patched to retain, but ExtensionsArgoCDReconciler has not
+       reported a sync since. Refusing to delete: a reconcile still holding the
+       pre-patch spec would destroy AppProject/$tenant. Check that controller is
+       running, then re-run. Nothing has been deleted."
+        fi
+      fi
+
+      # The finalizer on this CR is removed only by ExtensionsArgoCDReconciler,
+      # so the delete has to happen while the old controller is still running. If
+      # it hangs here, that controller is down -- bring it back up, do not clear
+      # the finalizer by hand.
+      stepline "delete Extensions/$ext_name -- makes the old controller let go."
+      printf '     AppProject/%s is NOT deleted. Only that controller can release the\n' "$tenant"
+      printf '     CR, so it has to be running.\n'
+      # A hang here means one thing: ExtensionsArgoCDReconciler is not running,
+      # so nothing is releasing tenantoperator.stakater.com/appproject. Say so,
+      # because the obvious recovery -- clearing the finalizer by hand -- skips
+      # the controller's retain check and can take the AppProject with it.
+      if ! run kc delete "$EXTENSIONS_GVR" "$ext_name" --wait=true --timeout=120s; then
+        die "deleting Extensions/$ext_name did not complete.
+       Almost always this means ExtensionsArgoCDReconciler is not running: it is the
+       only thing that removes the finalizer tenantoperator.stakater.com/appproject.
+       Bring the controller back up and re-run. Do NOT clear the finalizer by hand --
+       that skips its retain check.
+       AppProject/$tenant has not been touched."
+      fi
+
+      if (( APPLY )) && [[ -n $uid_before ]]; then
+        # A failed READ here must not be reported as a vanished AppProject:
+        # that message tells the operator the worst-case event occurred and
+        # points them at a restore they must not run against a live object.
+        survivor=$(kc get "$APPPROJECTS_GVR" "$tenant" -n "$argo_ns" \
+          -o jsonpath='{.metadata.uid}' --ignore-not-found) \
+          || die "could not read AppProject/$tenant after deleting its Extensions CR.
+       That is NOT proof it is gone -- do not apply the restore copy yet. Fix cluster
+       access, confirm what happened, and cut over no further tenants until then."
+        [[ -n $survivor ]] \
+          || die "AppProject/$tenant disappeared when its Extensions CR was deleted, so
+       the retain patch did not take. Put it back before continuing, and cut over no
+       further tenants:
+         kubectl apply -f <snapshot>/restore/$tenant.json"
+        # Same name, different object. The retain path was not taken: something
+        # deleted it and something else made a new one, so its role tokens are
+        # gone and any ownerRef naming the old UID now dangles. Checking the name
+        # alone reported this as a success, which is the one thing it is not.
+        [[ $survivor == "$uid_before" ]] \
+          || die "AppProject/$tenant was REPLACED, not retained: its uid changed from
+       $uid_before to $survivor. It was deleted and recreated, so its ArgoCD project
+       role tokens are gone and any ownerRef naming the old uid is dangling. Cut over
+       no further tenants until you know what deleted it."
+        stepline "verified AppProject/$tenant survived, uid unchanged"
+      elif (( APPLY )); then
+        # No AppProject existed before the drain. Reporting that as "disappeared"
+        # -- which the name-only check did -- claims data loss where there was
+        # never any data, and points at a restore file the snapshot cannot hold.
+        stepline "no AppProject existed before, so there was none to retain; the chart creates one"
+      fi
+    else
+      subhead "EXTENSIONS CR  --  none"
+      printf '     Nothing to drain. The AppProject is already unmanaged, so this is an\n'
+      printf '     adoption only.\n'
+    fi
+
+    # The opt-in is the one write that decides whether this tenant has an
+    # AppProject at all, so on a Git-managed Tenant it must be a commit: a sync
+    # reverts an out-of-band annotation, the child is reaped, and on an operator
+    # build without retain that DELETES the AppProject. Measured 2026-08-23 --
+    # 2 seconds, and it came back with a new UID.
+    local tenant_tracked=$tenant_tracked_pre
+
+    if (( tenant_tracked )); then
+      subhead "TENANT CR  --  $tenant, applied from Git"
+      # The window is narrower here -- steps 1-2 are synchronous kubectl, so the
+      # CR is already gone by the time this is read -- but the hazard is the same:
+      # a commit lands whenever ArgoCD next syncs, so pushed early it opts the
+      # tenant in while the controller still owns the AppProject.
+      printf '     Push this only AFTER the steps above have completed. It is a commit,\n'
+      printf '     so it lands on the next sync -- pushed early it opts the tenant in\n'
+      printf '     while the old controller still owns AppProject/%s.\n\n' "$tenant"
+      stepline "COMMIT the opt-in:"
+      if [[ $scaffolding_mode == OnAnnotation ]]; then
+        printf '\n    metadata:\n      annotations:\n        %s: "true"\n\n' "$key"
+      else
+        printf '\n    metadata:\n      labels:\n        %s: "true"\n\n' "$key"
+      fi
+      printf '    Then re-run this command to wait for the child and verify.\n'
+      if (( APPLY )); then
+        printf '    --apply stopped here on purpose: the CR is drained, the AppProject is\n'
+        printf '    intact and unmanaged, and ArgoCD would revert an out-of-band opt-in.\n'
+      fi
+      continue
+    fi
+
+    did_writable_work=1
+    subhead "TENANT CR  --  $tenant, applied by hand"
+    stepline "opt the tenant in: $key=true"
+    if [[ $scaffolding_mode == OnAnnotation ]]; then
+      run kc annotate "$TENANTS_GVR" "$tenant" "$key=true" --overwrite
+    else
+      run kc label "$TENANTS_GVR" "$tenant" "$key=true" --overwrite
+    fi
+
+    if (( APPLY )); then
+      wait_for_child "$tenant"
+    fi
+  done
+
+  # Only offer --apply when there is something for it to do: for a tenant whose
+  # objects all come from Git it writes nothing.
+  if ! (( APPLY )) && (( did_writable_work )); then
+    printf '\nRe-run with --apply to perform the handover.\n'
+  fi
+}
+
+# wait_for_controller_observation blocks until ExtensionsArgoCDReconciler has
+# reported a sync dated after now, proving it has processed the retain patch.
+#
+# A status timestamp rather than a sleep because the CR carries no
+# observedGeneration. updateArgoCDConfigStatus (tenant-operator
+# internal/controller/extensions/argocd/extensions_utils.go) replaces the whole
+# conditions slice with LastTransitionTime: metav1.Now() on every successful sync,
+# so a timestamp newer than the patch is proof the controller saw the new spec.
+#
+# Returns non-zero on timeout. Callers must treat that as "do not delete".
+wait_for_controller_observation() {
+  local ext_name=$1
+  local timeout=${MIGRATE_OBSERVE_TIMEOUT:-60}
+  local deadline=$((SECONDS + timeout))
+  # Bash 3.2 has no %(%s)T; date -u +%s works on both supported platforms.
+  local started ts
+  started=$(date -u +%s)
+
+  printf '  waiting for the old controller to observe the retain patch\n'
+  while (( SECONDS < deadline )); do
+    ts=$(kc get "$EXTENSIONS_GVR" "$ext_name" \
+      -o jsonpath='{.status.argocd.conditions[0].lastTransitionTime}' 2>/dev/null) || ts=''
+    if [[ -n $ts ]]; then
+      # RFC3339 -> epoch. GNU and BSD date disagree on the flag, so try both and
+      # treat an unparseable timestamp as "not yet", never as "observed".
+      local epoch=''
+      epoch=$(date -u -d "$ts" +%s 2>/dev/null) \
+        || epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$ts" +%s 2>/dev/null) \
+        || epoch=''
+      if [[ -n $epoch ]] && (( epoch >= started )); then
+        printf '    observed at %s\n' "$ts"
+        return 0
+      fi
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+# wait_for_child blocks until the tenant's child TemplateInstance reports Ready.
+# "The annotation was written" is not "the AppProject was adopted", and a failure
+# is per tenant, so a multi-tenant run stops on it.
+wait_for_child() {
+  local tenant=$1
+  local child="${CHILD_PREFIX}${tenant}"
+  local timeout=${MIGRATE_READY_TIMEOUT:-120}
+  local deadline=$((SECONDS + timeout)) ready='' read_ok=0
+
+  printf '  waiting for TemplateInstance/%s\n' "$child"
+  while (( SECONDS < deadline )); do
+    # Ignoring errors is right while polling, but a GET that never succeeded once
+    # is a read problem, not a rendering failure -- tracked so the timeout message
+    # below points at the right cause.
+    if ready=$(kc get "$TEMPLATEINSTANCES_GVR" "$child" -n "$OPERATOR_NS" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null); then
+      read_ok=1
+    else
+      ready=''
+    fi
+    if [[ $ready == True ]]; then
+      printf '  Ready. AppProject/%s is now managed by the chart.\n' "$tenant"
+      return
+    fi
+    sleep 3
+  done
+
+  printf '\n'
+  if (( ! read_ok )); then
+    die "TemplateInstance/$child could not be read even once in ${timeout}s. That is
+       a READ problem (access, or the wrong --operator-namespace), not a rendering
+       failure. The live AppProject has NOT been touched."
+  fi
+  kc get "$TEMPLATEINSTANCES_GVR" "$child" -n "$OPERATOR_NS" \
+    -o jsonpath='{range .status.conditions[?(@.status=="False")]}  {.type}: {.message}{"\n"}{end}' 2>&1 || true
+  die "TemplateInstance/$child did not become Ready within ${timeout}s.
+       The live AppProject has NOT been touched -- a child that fails to render applies
+       nothing, so this is recoverable. Fix the cause above, or roll this tenant back
+       per MIGRATION.md."
+}
+
+# -- run: the whole migration, one step at a time ----------------------------
+#
+# `run` reads the cluster, works out which step is next, and either performs it
+# (cluster-only work) or prints the exact thing to commit.
+#
+# The division: Tenants and Extensions CRs are authored by you and live in Git, so
+# writing them from a script would put the switch controlling an AppProject's
+# existence outside Git, where a sync can take it away again. AppProjects are
+# generated and have no manifest to edit, so that work is the tool's.
+#
+# Every state is derived from the cluster, never from a local file, so `run` is
+# resumable. The only thing on disk is the snapshot, and its absence is a state.
+
+STATE_DIR='.mto-argocd-migrate'
+BATCH=1
+
+# Each step: is it done, and whose job is it.
+S_INSTALLED=0 S_SEEDED=0 S_OVERRIDES=0 S_RETAIN=0
+S_OWNERREFS=0 S_SNAPSHOT=0 S_CUTOVER_DONE=0 S_CUTOVER_TOTAL=0 S_DRAINED=0
+
+compute_state() {
+  local ic exts tenants appprojects argo_ns
+
+  ic=$(integrationconfig_json)
+  exts=$(extensions_json)
+  tenants=$(kc get "$TENANTS_GVR" -o json)
+
+  if try_load_chart_config; then
+    S_INSTALLED=1
+    argo_ns=$(chart_value argoNamespace)
+  else
+    argo_ns=$(jq -r '.spec.integrations.argocd.namespace // ""' <<<"$ic")
+  fi
+  appprojects=$(appprojects_json "$argo_ns")
+
+  # The same hard stops `inventory` enforces: `run` is the documented entry point,
+  # so it cannot be the one that walks past them.
+  preflight_stops "$ic" "$appprojects" "$argo_ns"
+
+  if (( S_INSTALLED )); then
+    local sm
+    sm=$(chart_value scaffoldingMode)
+    if [[ $sm != OnAnnotation && $sm != OnLabel ]]; then
+      warn "scaffolding.mode is $sm. Migration is per tenant, and Always opts every
+         tenant in at once -- colliding with every Extensions CR still on this cluster.
+         Reinstall with OnAnnotation before cutting anyone over."
+    fi
+  fi
+
+  # 2. seeded: both resource lists match the IntegrationConfig's BY CONTENT, and
+  #    the chart writes into the namespace the controller already writes into.
+  if (( S_INSTALLED )); then
+    local wl bl cwl cbl
+    wl=$(resource_list_canonical "$(jq -c '.spec.integrations.argocd.clusterResourceWhitelist // []' <<<"$ic")" ic)
+    bl=$(resource_list_canonical "$(jq -c '.spec.integrations.argocd.namespaceResourceBlacklist // []' <<<"$ic")" ic)
+    cwl=$(resource_list_canonical "$(chart_value defaultWhitelistJson)" chart)
+    cbl=$(resource_list_canonical "$(chart_value defaultBlacklistJson)" chart)
+    if [[ $wl == "$cwl" && $bl == "$cbl" && -n $argo_ns ]]; then
+      S_SEEDED=1
+    fi
+  fi
+
+  # 3. overrides: every Extensions CR override has a matching Tenant annotation,
+  #    compared by VALUE -- a stale annotation is as wrong as a missing one.
+  if (( S_INSTALLED )); then
+    local missing
+    missing=$(pending_override_annotations "$exts" "$tenants")
+    [[ -z $missing ]] && S_OVERRIDES=1
+  fi
+
+  # 4. retain: no CR still says purge. This gates everything after it, because
+  #    deleting a purge=true CR destroys the live AppProject.
+  [[ $(jq '[(.items // [])[] | select(.spec.argoCD.onDeletePurgeAppProject // false)] | length' <<<"$exts") == 0 ]] \
+    && S_RETAIN=1
+
+  # 5-6. the tool's own work.
+  [[ -z $(legacy_owner_ref_names "$appprojects") ]] && S_OWNERREFS=1
+  [[ -f $STATE_DIR/snapshot/.complete ]] && S_SNAPSHOT=1
+
+  # 7. handover, counted per tenant. The denominator is tenants IN SCOPE, not
+  #    every Tenant: one with neither an Extensions CR nor an AppProject was never
+  #    served by the controller, and counting it leaves the step permanently short
+  #    of its total so a finished migration reads as unfinished.
+  local key mode field
+  mode=$( (( S_INSTALLED )) && chart_value scaffoldingMode || echo "" )
+  key=$( (( S_INSTALLED )) && optin_key || echo "" )
+  field=$( (( S_INSTALLED )) && optin_field || echo annotations )
+  S_CUTOVER_TOTAL=$(jq --argjson e "$exts" --argjson a "$appprojects" '
+    [ (.items // [])[]
+      | . as $t
+      | select(([($e.items // [])[] | select(.spec.tenantName == $t.metadata.name)] | length > 0)
+            or ([($a.items // [])[] | select(.metadata.name  == $t.metadata.name)] | length > 0))
+    ] | length' <<<"$tenants")
+  S_CUTOVER_DONE=$(jq --argjson e "$exts" --argjson a "$appprojects" --arg ann "$key" --arg f "$field" '
+    [ (.items // [])[]
+      | . as $t
+      | select([($a.items // [])[] | select(.metadata.name == $t.metadata.name)] | length > 0)
+      | select([($e.items // [])[] | select(.spec.tenantName == $t.metadata.name)] | length == 0)
+      | select((($t.metadata[$f] // {})[$ann] // "") == "true")
+    ] | length' <<<"$tenants")
+
+  # 8. drained: zero Extensions objects, including any naming a tenant that
+  #    does not exist -- those hold the finalizer that blocks removing the CRD.
+  [[ $(jq '(.items // []) | length' <<<"$exts") == 0 ]] && S_DRAINED=1
+
+  RUN_IC=$ic RUN_EXTS=$exts RUN_TENANTS=$tenants RUN_APS=$appprojects
+  RUN_ARGO_NS=$argo_ns RUN_MODE=$mode RUN_OPTIN_KEY=$key RUN_OPTIN_FIELD=$field
+}
+
+# pending_override_annotations lists tenant/key/value triples whose Extensions CR
+# sets an override the Tenant does not carry, or carries with a different value.
+pending_override_annotations() {
+  jq -r --argjson t "$2" \
+    --arg kr "$(chart_value annotationSourceRepos)" \
+    --arg kw "$(chart_value annotationClusterResourceWhitelist)" \
+    --arg kb "$(chart_value annotationNamespaceResourceBlacklist)" \
+    --arg kp "$(chart_value annotationOnDeletePurge)" '
+    [($t.items // [])[]] as $tenants
+    | (.items // [])[]
+    | .spec.tenantName as $tn
+    | (.spec.argoCD.appProject // {}) as $ap
+    | (.spec.argoCD.onDeletePurgeAppProject // false) as $purge
+    | (($tenants[] | select(.metadata.name == $tn) | .metadata.annotations) // {}) as $have
+    | [
+        (if $ap.sourceRepos != null                then [$kr, ($ap.sourceRepos | tojson)] else empty end),
+        (if $ap.clusterResourceWhitelist != null   then [$kw, ($ap.clusterResourceWhitelist | tojson)] else empty end),
+        (if $ap.namespaceResourceBlacklist != null then [$kb, ($ap.namespaceResourceBlacklist | tojson)] else empty end),
+        (if $purge then [$kp, "true"] else empty end)
+      ][]
+    | select($have[.[0]] != .[1])
+    | [$tn, .[0], .[1]] | @tsv' <<<"$1"
+}
+
+checkbox() { (( $1 )) && printf '[x]' || printf '[ ]'; }
+
+print_state() {
+  heading "Migration state"
+  printf '  %s 1  chart installed\n'                       "$(checkbox $S_INSTALLED)"
+  printf '  %s 2  resource lists seeded from the IntegrationConfig\n' "$(checkbox $S_SEEDED)"
+  printf '  %s 3  per-tenant overrides carried across\n'   "$(checkbox $S_OVERRIDES)"
+  printf '  %s 4  onDeletePurgeAppProject false everywhere\n' "$(checkbox $S_RETAIN)"
+  printf '  %s 5  legacy ownerRefs stripped\n'             "$(checkbox $S_OWNERREFS)"
+  printf '  %s 6  snapshot taken\n'                        "$(checkbox $S_SNAPSHOT)"
+  printf '  %s 7  tenants cut over            %s of %s\n'  \
+    "$(checkbox $(( S_CUTOVER_DONE == S_CUTOVER_TOTAL && S_CUTOVER_TOTAL > 0 )))" \
+    "$S_CUTOVER_DONE" "$S_CUTOVER_TOTAL"
+  printf '  %s 8  Extensions CRs drained\n'                "$(checkbox $S_DRAINED)"
+}
+
+commit_block() {
+  printf '\n  ----- commit this -------------------------------------------------\n'
+  sed 's/^/  /'
+  printf '  -------------------------------------------------------------------\n'
+  printf '\n  Then sync, and run `%s run` again.\n\n' "$(self_invocation)"
+}
+
+cmd_run() {
+  compute_state
+  print_state
+
+  if (( ! S_INSTALLED )); then
+    heading "Next — install the chart"
+    cat <<EOF
+  Nothing is scaffolded by installing: scaffolding.mode defaults to OnAnnotation.
+  These values come from the live IntegrationConfig, so install with them rather
+  than installing bare and upgrading afterwards.
+EOF
+    cmd_values | commit_block
+    return
+  fi
+
+  if (( ! S_SEEDED )); then
+    heading "Next — seed the resource lists"
+    cat <<EOF
+  The chart no longer reads integrations.argocd from the IntegrationConfig. Cut a
+  tenant over before this lands and its AppProject loses both lists, silently.
+EOF
+    cmd_values | commit_block
+    return
+  fi
+
+  if (( ! S_OVERRIDES )); then
+    heading "Next — carry the per-tenant overrides across"
+    cat <<EOF
+  These are inert until a tenant is opted in, so they are safe to land now. An
+  absent annotation inherits the chart default; an explicit [] overrides with
+  empty, which is why a CR setting [] is carried across as [] and not skipped.
+EOF
+    emit_override_annotations | commit_block
+    return
+  fi
+
+  if (( ! S_RETAIN )); then
+    heading "Next — turn purge off, and let it land on its own"
+    cat <<EOF
+  "Purge" means delete. Any CR below would destroy its live AppProject the moment
+  it is removed -- and if the chart already held that AppProject, the controller's
+  delete would be denied instead, leaving the CR in Terminating forever.
+
+  This MUST be its own commit. Do not combine it with deleting the CR.
+EOF
+    emit_retain_edits | commit_block
+    return
+  fi
+
+  if (( ! S_OWNERREFS )); then
+    heading "Next — strip legacy ownerRefs (mine to do)"
+    printf '  AppProjects are generated objects with no manifest in Git, so this is a\n'
+    printf '  direct patch. It removes only the v1beta2 Tenant ref.\n\n'
+    cmd_strip_owner_refs
+    if (( APPLY )); then
+      printf '\n  Done. Run `%s run` again.\n' "$(self_invocation)"
+    fi
+    return
+  fi
+
+  if (( ! S_SNAPSHOT )); then
+    heading "Next — snapshot every AppProject (mine to do)"
+    printf '  The only record of what the controller produced, and what every later\n'
+    printf '  diff compares against.\n\n'
+    if (( APPLY )); then
+      cmd_snapshot "$STATE_DIR/snapshot"
+      printf '\n  Run `%s run` again.\n' "$(self_invocation)"
+    else
+      printf '  would run: %s snapshot %s/snapshot\n\n' "$(self_invocation)" "$STATE_DIR"
+    fi
+    return
+  fi
+
+  # The go/no-go gate: every AppProject the chart already owns, compared against
+  # the snapshot, shown BEFORE the next tenant is offered.
+  if (( S_CUTOVER_DONE > 0 )); then
+    cmd_diff "$STATE_DIR/snapshot"
+  fi
+
+  local next count
+  next=$(next_tenants_to_cut_over)
+  if [[ -n $next ]]; then
+    count=$(wc -w <<<"$next" | tr -d ' ')
+    heading "Next — cut over $count $( (( count == 1 )) && echo tenant || echo tenants )"
+    cat <<EOF
+  One commit per tenant: delete its Extensions CR and add the opt-in annotation.
+  They can be the same commit now that purge is off everywhere -- worst case is a
+  few seconds where both writers claim the AppProject, and the chart wins.
+EOF
+    # Only point at a diff that was actually printed.
+    if (( S_CUTOVER_DONE > 0 )); then
+      cat <<EOF
+
+  Read the diff above first. If anything beyond the description and the added
+  users has changed, stop.
+EOF
+    fi
+    # The same warning `handover` prints, and OUTSIDE the commit block: text
+    # inside "commit this" reads as something to commit.
+    local t tokens
+    for t in $next; do
+      tokens=$(appproject_tokens "$(jq -c --arg n "$t" \
+        '(.items // [])[] | select(.metadata.name == $n)' <<<"$RUN_APS")")
+      if [[ -n $tokens ]]; then
+        printf '\n'
+        print_token_loss_warning "$t" "$RUN_ARGO_NS" "$tokens"
+      fi
+    done
+
+    emit_handover "$next" | commit_block
+    return
+  fi
+
+  if (( ! S_DRAINED )); then
+    heading "Next — delete the leftover Extensions CRs"
+    # Two different situations. A CR whose Tenant EXISTS and is already opted in
+    # means both writers hold that AppProject right now -- the collision this tool
+    # exists to avoid -- which is not cleanup work. The third bucket catches
+    # anything the first two do not, so this can never print a heading and no list.
+    local classified
+    classified=$(jq -r --argjson t "$RUN_TENANTS" --arg ann "$RUN_OPTIN_KEY" --arg f "$RUN_OPTIN_FIELD" '
+      [($t.items // [])[]] as $tenants
+      | (.items // [])[]
+      | . as $cr
+      | (($tenants[] | select(.metadata.name == $cr.spec.tenantName)) // null) as $t
+      | (if $t == null then "ghost"
+         elif (($t.metadata[$f] // {})[$ann] // "") == "true" then "collision"
+         else "other" end) as $cat
+      | "\($cat)\t  - Extensions/\($cr.metadata.name)  (tenantName=\($cr.spec.tenantName))"' <<<"$RUN_EXTS")
+    pick() { awk -F'\t' -v c="$1" '$1 == c { print $2 }' <<<"$classified"; }
+
+    local collision ghost other
+    collision=$(pick collision)
+    ghost=$(pick ghost)
+    other=$(pick other)
+    unset -f pick
+
+    if [[ -n $collision ]]; then
+      printf '  STOP. These name a tenant that is ALREADY opted in, so the old controller\n'
+      printf '  and the chart both claim its AppProject right now:\n\n'
+      printf '%s\n' "$collision"
+      printf '\n  The chart wins every write and the controller retries forever, on the\n'
+      printf '  Extensions CR where nobody looks. Remove these first.\n'
+    fi
+    if [[ -n $ghost ]]; then
+      [[ -n $collision ]] && printf '\n'
+      printf '  These name tenants that do not exist, so they never produced an AppProject.\n'
+      printf '  They still hold the finalizer that blocks removing the CRD.\n\n'
+      printf '%s\n' "$ghost"
+    fi
+    if [[ -n $other ]]; then
+      [[ -n $collision || -n $ghost ]] && printf '\n'
+      printf '  These name a tenant that has not been cut over. That should have been\n'
+      printf '  offered as step 7, so something is inconsistent -- re-run `inventory`.\n\n'
+      printf '%s\n' "$other"
+    fi
+    printf '\n  Delete their manifests from Git, sync, then run `%s run` again.\n\n' "$(self_invocation)"
+    return
+  fi
+
+  heading "Done"
+  cat <<EOF
+  Every tenant is on the chart and no Extensions CRs remain.
+
+  Remaining, in this order -- reversing the last two wedges the CRD:
+    1. remove ExtensionsArgoCDReconciler and its Deployment
+    2. then remove the Extensions CRD
+
+  Set sourceRepos for any tenant that has none (MIGRATION.md, step 10). Keep
+  $STATE_DIR/snapshot until this is signed off.
+
+EOF
+}
+
+# next_tenants_to_cut_over returns the next BATCH tenants still to migrate: those
+# with an Extensions CR to drain, or with an AppProject the chart has not adopted.
+# The second case is the orphan -- an AppProject nobody ever wrote a CR for.
+next_tenants_to_cut_over() {
+  jq -r --argjson e "$RUN_EXTS" --argjson a "$RUN_APS" --arg ann "$RUN_OPTIN_KEY" \
+        --arg f "$RUN_OPTIN_FIELD" --argjson n "$BATCH" '
+    [ (.items // [])[]
+      | . as $t
+      | select(([($e.items // [])[] | select(.spec.tenantName == $t.metadata.name)] | length > 0)
+            or ([($a.items // [])[] | select(.metadata.name  == $t.metadata.name)] | length > 0))
+      | select((($t.metadata[$f] // {})[$ann] // "") != "true")
+      | $t.metadata.name ] | .[0:$n] | join(" ")' <<<"$RUN_TENANTS"
+}
+
+# emit_override_annotations splits by who applies the Tenant, exactly as
+# `annotations` does: a manifest edit for a hand-applied Tenant is an edit nothing
+# will ever read.
+emit_override_annotations() {
+  local tenant key value current='' any_hand=0
+  while IFS=$'\t' read -r tenant key value; do
+    [[ -z $tenant ]] && continue
+    is_tracked_one "$TENANTS_GVR" "$tenant" || { any_hand=1; continue; }
+    if [[ $tenant != "$current" ]]; then
+      [[ -n $current ]] && printf '\n'
+      printf '# the Tenant manifest for %s\nmetadata:\n  annotations:\n' "$tenant"
+      current=$tenant
+    fi
+    printf '    %s: %s\n' "$key" "$(yaml_squote "$value")"
+  done < <(pending_override_annotations "$RUN_EXTS" "$RUN_TENANTS")
+
+  if (( any_hand )); then
+    [[ -n $current ]] && printf '\n'
+    printf '# These Tenants are NOT applied from Git, so committing a manifest for them\n'
+    printf '# changes nothing. Run this instead:\n'
+    printf '#   %s annotations --apply\n' "$(self_invocation)"
+  fi
+}
+
+emit_retain_edits() {
+  jq -r '(.items // [])[]
+    | select(.spec.argoCD.onDeletePurgeAppProject // false)
+    | "# the Extensions manifest for \(.metadata.name)\nspec:\n  argoCD:\n    onDeletePurgeAppProject: false\n"' <<<"$RUN_EXTS"
+}
+
+# emit_handover names the two edits per tenant, whose each one is, and why they
+# cannot be one commit: removing the CR is not a change to the purge field, so a
+# single commit leaves purge at whatever last landed -- and if that is true, the
+# prune destroys the AppProject.
+emit_handover() {
+  local tenant ext purge
+  for tenant in $1; do
+    ext=$(jq -r --arg t "$tenant" '(.items // [])[] | select(.spec.tenantName == $t) | .metadata.name' <<<"$RUN_EXTS" | head -1)
+
+    printf '# ---- %s ----\n' "$tenant"
+    if [[ -z $ext ]]; then
+      # An orphan AppProject: adopted as-is, with nothing to drain. Without this
+      # branch the block headed "commit this" tells you to delete a manifest that
+      # does not exist, with the name left blank.
+      printf '# No Extensions CR names this tenant, so there is nothing to drain and no\n'
+      printf '# ordering to respect. Opting in adopts the existing AppProject/%s as-is.\n\n' "$tenant"
+    else
+      purge=$(jq -r --arg n "$ext" '(.items // [])[] | select(.metadata.name == $n)
+        | .spec.argoCD.onDeletePurgeAppProject // false' <<<"$RUN_EXTS")
+      if [[ $purge == true ]]; then
+        printf '# 1. FIRST, and as its own commit: onDeletePurgeAppProject: false on %s.\n' "$ext"
+        printf '#    Removing the manifest is not a change to this field, so a single\n'
+        printf '#    commit leaves it true -- and the prune then deletes AppProject/%s.\n' "$tenant"
+        printf 'spec:\n  argoCD:\n    onDeletePurgeAppProject: false\n\n'
+        printf '# 2. THEN delete the manifest defining Extensions/%s.\n' "$ext"
+      else
+        printf '# 1. delete the manifest defining Extensions/%s.\n' "$ext"
+        printf '#    (onDeletePurgeAppProject is already false, so no disarm commit.)\n'
+      fi
+      printf '#    ArgoCD prunes it, the old controller releases its finalizer, and\n'
+      printf '#    AppProject/%s is retained.\n\n' "$tenant"
+    fi
+
+    if is_tracked_one "$TENANTS_GVR" "$tenant"; then
+      if [[ -n $ext ]]; then
+        printf '# LAST, only after the above has synced -- opting in while the CR still\n'
+        printf '# exists puts two writers on AppProject/%s. Tenant manifest for %s:\n' "$tenant" "$tenant"
+      else
+        printf '# Tenant manifest for %s:\n' "$tenant"
+      fi
+      emit_optin_yaml "$RUN_OPTIN_KEY" "$RUN_MODE" ''
+      printf '\n'
+    else
+      if [[ -n $ext ]]; then
+        printf '# LAST, only after the above has synced: Tenant/%s is applied by hand,\n' "$tenant"
+        printf '# so opt it in with a command rather than a commit:\n'
+      else
+        printf '# Tenant/%s is applied by hand, so opt it in with a command:\n' "$tenant"
+      fi
+      printf '#   %s handover %s --apply\n\n' "$(self_invocation)" "$tenant"
+    fi
+  done
+}
+
+# -- entrypoint --------------------------------------------------------------
+
+main() {
+  local positional=()
+  # --flag=value normalised to --flag value up front: self_invocation prints the
+  # = form, so the parser has to accept what this script tells you to copy.
+  local argv=() a
+  for a in "$@"; do
+    case $a in
+      --context=*|--operator-namespace=*|--integrationconfig=*|--ic-namespace=*|--state-dir=*|--batch=*)
+        argv+=("${a%%=*}" "${a#*=}") ;;
+      *) argv+=("$a") ;;
+    esac
+  done
+  set -- ${argv[@]+"${argv[@]}"}
+  while (( $# )); do
+    case $1 in
+      --context)            CONTEXT=${2:?--context needs a value}; shift 2 ;;
+      --operator-namespace) OPERATOR_NS=${2:?--operator-namespace needs a value}; shift 2 ;;
+      --integrationconfig)  IC_NAME=${2:?--integrationconfig needs a value}; shift 2 ;;
+      --ic-namespace)       IC_NS=${2:?--ic-namespace needs a value}; shift 2 ;;
+      --apply)              APPLY=1; shift ;;
+      --yes)                ASSUME_YES=1; shift ;;
+      --state-dir)          STATE_DIR=${2:?--state-dir needs a value}; shift 2 ;;
+      --batch)              BATCH=${2:?--batch needs a value}
+                            # This reaches jq as --argjson, so a typo would die
+                            # there; and --batch 0 would silently offer no tenant
+                            # and read as a finished migration.
+                            [[ $BATCH =~ ^[1-9][0-9]*$ ]] \
+                              || die "--batch takes a positive integer, not '$BATCH'"
+                            shift 2 ;;
+      -h|--help)            usage; exit 0 ;;
+      --*)                  die "unknown flag: $1" ;;
+      *)                    positional[${#positional[@]}]=$1; shift ;;
+    esac
+  done
+
+  (( ${#positional[@]} )) || { usage; exit 1; }
+  require_tools
+  IC_NS=${IC_NS:-$OPERATOR_NS}
+
+  local cmd=${positional[0]}
+  local args=()
+  if (( ${#positional[@]} > 1 )); then
+    args=("${positional[@]:1}")
+  fi
+
+  case $cmd in
+    run)              cmd_run ;;
+    inventory)        cmd_inventory ;;
+    values)           cmd_values ;;
+    annotations)      cmd_annotations ;;
+    strip-owner-refs) cmd_strip_owner_refs ${args[@]+"${args[@]}"} ;;
+    snapshot)         cmd_snapshot ${args[@]+"${args[@]}"} ;;
+    diff)             cmd_diff ${args[@]+"${args[@]}"} ;;
+    # cutover is the name MIGRATION.md uses; handover says what it does.
+    handover|cutover) cmd_handover ${args[@]+"${args[@]}"} ;;
+    *)                die "unknown command: $cmd (try --help)" ;;
+  esac
+}
+
+main "$@"

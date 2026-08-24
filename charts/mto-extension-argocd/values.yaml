@@ -206,9 +206,15 @@ sync:
     # only a mirror, and status is stripped automatically; the spec field is
     # not. Without this exemption strict denies a supported ArgoCD workflow.
     #
-    # Exempting it is safe: this chart never renders jwtTokens, and
-    # server-side apply only owns the fields it sets, so tokens survive every
-    # re-render regardless.
+    # NOT sufficient on its own, despite appearances. The exemption does stop the
+    # strict webhook and drift detection from reverting ArgoCD's write, but it does
+    # not survive template-operator-v2's apply: spec.roles is an ATOMIC list, the
+    # chart must render it, so every apply replaces the whole list and takes
+    # jwtTokens with it. Silently -- the AppProject stays healthy.
+    #
+    # So: do not keep ArgoCD project role tokens on an operator-managed AppProject.
+    # Use a local-account API key or SSO. Full account: TOV2-10 in
+    # docs/upstream-issues.md.
     - spec.roles[*].jwtTokens
 
 # Default for whether deleting a Tenant (or descaffolding it) deletes its
