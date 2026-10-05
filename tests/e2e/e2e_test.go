@@ -23,7 +23,12 @@
 //	KUBE_CONTEXT=<context> \
 //	E2E_TENANT=<an existing tenant to borrow> \
 //	E2E_ARGO_NAMESPACE=<where ArgoCD runs> \
+//	E2E_OPERATOR_NAMESPACE=<where the IntegrationConfig is> \
 //	make e2e-test
+//
+// E2E_OPERATOR_NAMESPACE is the chart's operatorNamespace and its
+// integrationConfig.namespace. It defaults to E2E_ARGO_NAMESPACE, which is
+// right only when the IntegrationConfig lives there.
 //
 // `make e2e-test` rather than a bare `go test`: the target sets E2E=1 and pins
 // HELM to bin/helm. A bare invocation with no HELM= installs the chart with
@@ -171,8 +176,8 @@ func envOr(k, def string) string {
 
 // expectRetain reports whether this run ASSERTS the retain contract instead of
 // merely reporting which behaviour it observed. Which one you get is a property
-// of the template-operator-v2 build (TOV2-1): released builds up to 0.0.6
-// delete on descaffold, 8a44194+ releases.
+// of the template-operator-v2 build: releases up to 0.0.6 delete on
+// descaffold, 0.0.7 and later release.
 //
 // TODO: no lane sets E2E_EXPECT_RETAIN=1 yet. Wire it into the kind lane the
 // moment a fixed operator version is pinned (see TOV2_CHART_VERSION in the
@@ -219,8 +224,7 @@ func TestLifecycle(t *testing.T) {
 		if got := spec["description"]; got != "Managed by mto-extension-argocd" {
 			t.Errorf("description = %v", got)
 		}
-		// S19:
-		// the ArgoCD namespace is always a destination. On a tenant with
+		// The ArgoCD namespace is always a destination. On a tenant with
 		// no labelled namespaces it is the ONLY one -- and the tenant must
 		// still get a project rather than be skipped.
 		if !contains(destinations(spec), argoNS) {
@@ -229,18 +233,21 @@ func TestLifecycle(t *testing.T) {
 		if roles, _ := spec["roles"].([]any); len(roles) != 3 {
 			t.Errorf("%d roles, want 3", len(roles))
 		}
-		// Retain intent is stamped even though template-operator-v2 does not
-		// honour it yet (TOV2-1).
+		// Retain intent is stamped even though template-operator-v2 v0.0.6
+		// and earlier do not honour it.
 		if ap.GetAnnotations()["templates.v2.stakater.com/deletion-policy"] != "Orphan" {
 			t.Error("deletion-policy annotation not stamped")
 		}
 	})
 
 	t.Run("roles carry the tenant's users", func(t *testing.T) {
-		// The deliberate change from ExtensionsArgoCDReconciler. Without it a
-		// tenant whose owners are users rather than groups gets no ArgoCD
-		// access at all on vanilla Kubernetes, because the generated group
-		// only resolves under syncOCPGroups on OpenShift.
+		// The deliberate change from ExtensionsArgoCDReconciler: the generated
+		// group only resolves under syncOCPGroups on OpenShift, so a tenant
+		// whose owners are users depends on these entries.
+		//
+		// Limit: this asserts the rendered object only. Whether ArgoCD grants
+		// the access depends on argocd-rbac-cm `scopes`, which must include
+		// the claim that carries the user name (README, "Before production").
 		users := tenantUsers(t, "owners")
 		if len(users) == 0 {
 			t.Skipf("tenant %s has no owner users to assert on", tenant)
@@ -346,6 +353,11 @@ func TestLifecycle(t *testing.T) {
 	// strict mode would deny every token a tenant mints for its CI. The chart
 	// refuses to render strict without it; this proves the exemption actually
 	// works against the live webhook.
+	//
+	// The token is written through the Kubernetes API, not the ArgoCD API, so
+	// ArgoCD's own validation of the project is not exercised here. That
+	// validation is what rejected the old `*` policy resource; the render
+	// tests' invariants 7 and 8 cover it.
 	t.Run("strict sync still allows ArgoCD to mint a project role token", func(t *testing.T) {
 		ap := mustGet(t, gvkAppProject, argoNS, tenant)
 		// A JSON patch, precisely because a merge patch on spec.roles replaces
@@ -374,7 +386,7 @@ func TestLifecycle(t *testing.T) {
 	//
 	// onDeletePurgeAppProject defaults to false, which the chart expresses by
 	// stamping templates.v2.stakater.com/deletion-policy: Orphan on every
-	// AppProject it renders. Whether that is honoured is TOV2-1: older builds
+	// AppProject it renders. Only template-operator-v2 v0.0.7+ honours it: older builds
 	// delete every rendered resource unconditionally, so descaffolding a tenant
 	// took its ArgoCD project with it.
 	//
@@ -394,7 +406,7 @@ func TestLifecycle(t *testing.T) {
 			if expectRetain() {
 				t.Fatal("E2E_EXPECT_RETAIN is set, but descaffolding deleted the tenant's AppProject")
 			}
-			t.Log("TOV2-1 NOT IMPLEMENTED in this build: the retain annotation was ignored " +
+			t.Log("retain NOT IMPLEMENTED in this build (tov2 v0.0.6 or earlier): the retain annotation was ignored " +
 				"and descaffolding deleted the tenant's AppProject")
 			return
 		}
@@ -419,7 +431,7 @@ func TestLifecycle(t *testing.T) {
 		// Re-opting-in ADOPTS the project the previous subtest left behind --
 		// deliberately, rather than deleting it first and waiting for a fresh
 		// one. An out-of-band delete followed immediately by a re-opt-in is
-		// the shape that hits the stale-cache half of TOV2-8: the operator
+		// the shape that hits a template-operator-v2 stale-cache bug: the operator
 		// compares against a resource its informer still holds, logs "No drift
 		// detected, skipping apply" and never recreates anything. Adoption
 		// exercises the same code path this test cares about without racing
@@ -591,17 +603,15 @@ func helmUpgrade(t *testing.T, extra ...string) {
 	helmRun(t, append([]string{"upgrade", releaseName, chartDir(t)}, helmArgs(extra...)...))
 }
 
-// helmUninstall tears the release down in the ORDER NOTES.txt tells operators
-// to use, and waits for each step. Both waits are load-bearing.
+// helmUninstall tears the release down and waits for each step. Both waits are
+// load-bearing.
 //
-// Drain the children first. `helm uninstall` deletes the RBAC and the
-// TemplateInstances together; the RBAC goes immediately while each child waits
-// on a finalizer that needs that RBAC to delete its AppProject, so nothing
-// completes and every object has to have its finalizer cleared by hand
-// (TOV2-5). Deleting the parent first lets the children -- and their
-// AppProjects -- drain while the operator can still act. Measured: skipping
-// this left an AppProject stuck in Terminating for the rest of the run, with
-// DELETE returning success and the object never going away.
+// Drain the children first. The chart keeps its RBAC on uninstall, so a plain
+// `helm uninstall` is safe as well. Before the RBAC was kept, it went with the
+// release while each child waited on a finalizer that needed it: measured, that
+// left an AppProject stuck in Terminating for the rest of the run, with DELETE
+// returning success and the object never going away. Deleting the parent first
+// still makes a failed reap show here, as a timeout on the drain.
 //
 // Then wait for the parent Template. `helm uninstall` returns as soon as the
 // API server accepts the deletes, but template-operator-v2 holds a finalizer on
@@ -611,10 +621,10 @@ func helmUpgrade(t *testing.T, extra ...string) {
 //	Template "mto-argocd-parent" ... exists and cannot be imported into the
 //	current release: invalid ownership metadata
 //
-// which is a real operational hazard, not just a test artefact (TOV2-4).
+// which is a real operational hazard, not just a test artefact.
 //
-// Running the documented procedure here rather than a bare `helm uninstall`
-// means the runbook is exercised on every test that installs anything.
+// This is not the bare `helm uninstall` that NOTES.txt documents. The kept RBAC
+// that makes the bare command safe is pinned by the render tests.
 func helmUninstall(t *testing.T) {
 	t.Helper()
 	if parent := get(t, gvkTemplateIn, operatorNS, "mto-argocd-parent"); parent != nil {

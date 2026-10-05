@@ -28,19 +28,34 @@ spec:
         - inherit-owners
       name: inherit-owner
       policies:
-        - p, proj:inherit:inherit-owner, *, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, applications, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, applicationsets, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, logs, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, exec, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, repositories, *, inherit/*, allow
+        - p, proj:inherit:inherit-owner, clusters, *, inherit/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - inherit-edit-group-afec3d
       name: inherit-edit
       policies:
-        - p, proj:inherit:inherit-edit, *, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, applications, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, applicationsets, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, logs, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, exec, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, repositories, *, inherit/*, allow
+        - p, proj:inherit:inherit-edit, clusters, *, inherit/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - inherit-view-group-87e8be
       name: inherit-view
       policies:
-        - p, proj:inherit:inherit-view, *, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, applications, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, applicationsets, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, logs, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, exec, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, repositories, get, inherit/*, allow
+        - p, proj:inherit:inherit-view, clusters, get, inherit/*, allow
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -63,19 +78,34 @@ spec:
         - emptied-owners
       name: emptied-owner
       policies:
-        - p, proj:emptied:emptied-owner, *, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, applications, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, applicationsets, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, logs, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, exec, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, repositories, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, clusters, *, emptied/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - emptied-edit-group-af9458
       name: emptied-edit
       policies:
-        - p, proj:emptied:emptied-edit, *, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, applications, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, applicationsets, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, logs, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, exec, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, repositories, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, clusters, *, emptied/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - emptied-view-group-4a40bd
       name: emptied-view
       policies:
-        - p, proj:emptied:emptied-view, *, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, applications, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, applicationsets, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, logs, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, exec, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, repositories, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, clusters, get, emptied/*, allow
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -102,16 +132,31 @@ spec:
         - explicit-owners
       name: explicit-owner
       policies:
-        - p, proj:explicit:explicit-owner, *, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, applications, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, applicationsets, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, logs, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, exec, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, repositories, *, explicit/*, allow
+        - p, proj:explicit:explicit-owner, clusters, *, explicit/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - explicit-edit-group-0ba420
       name: explicit-edit
       policies:
-        - p, proj:explicit:explicit-edit, *, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, applications, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, applicationsets, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, logs, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, exec, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, repositories, *, explicit/*, allow
+        - p, proj:explicit:explicit-edit, clusters, *, explicit/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - explicit-view-group-0e1997
       name: explicit-view
       policies:
-        - p, proj:explicit:explicit-view, *, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, applications, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, applicationsets, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, logs, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, exec, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, repositories, get, explicit/*, allow
+        - p, proj:explicit:explicit-view, clusters, get, explicit/*, allow

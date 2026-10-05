@@ -1,0 +1,45 @@
+{
+  "apiVersion": "tenantoperator.stakater.com/v1beta3",
+  "kind": "Tenant",
+  "metadata": {
+    "name": "pe"
+  },
+  "spec": {
+    "accessControl": {
+      "editors": {
+        "groups": [
+          "review-editors"
+        ],
+        "users": [
+          "bob@example.com"
+        ]
+      },
+      "owners": {
+        "groups": [
+          "review-owners-b",
+          "review-owners-a"
+        ],
+        "users": [
+          "alice@example.com",
+          "dave@example.com"
+        ]
+      },
+      "viewers": {
+        "groups": [
+          "review-viewers"
+        ],
+        "users": [
+          "carol@example.com"
+        ]
+      }
+    },
+    "namespaces": {
+      "onDeletePurgeNamespaces": false,
+      "withoutTenantPrefix": [
+        "pe-payments",
+        "pe-batch"
+      ]
+    },
+    "quota": "small"
+  }
+}

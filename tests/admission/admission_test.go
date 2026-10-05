@@ -130,7 +130,7 @@ func TestRenderedObjectsAreAccepted(t *testing.T) {
 `,
 		},
 		{name: "rbac-disabled", sets: []string{"rbac.create=false"}},
-		{name: "source-repos", sets: []string{"argocd.sourceRepos.pattern=https://github.com/acme/{{ tenant }}-gitops"}},
+		{name: "source-repos", sets: []string{"argocd.sourceRepos.pattern[0]=https://github.com/acme/{{ tenant }}-gitops"}},
 		{
 			// A values file rather than --set: `--set x.group=` yields null,
 			// which the schema rejects, and the empty core API group is

@@ -41,7 +41,14 @@ func ChartDir(t *testing.T) string {
 // render paths values.schema.json never sees.
 func HelmTemplate(t *testing.T, valuesYAML string, sets map[string]string, extraArgs ...string) (string, error) {
 	t.Helper()
-	args := []string{"template", "argocd", ChartDir(t)}
+	return HelmTemplateRelease(t, "argocd", valuesYAML, sets, extraArgs...)
+}
+
+// HelmTemplateRelease is HelmTemplate with a chosen release name, for tests
+// that must tell a fixed name from one derived from the release.
+func HelmTemplateRelease(t *testing.T, release, valuesYAML string, sets map[string]string, extraArgs ...string) (string, error) {
+	t.Helper()
+	args := []string{"template", release, ChartDir(t)}
 	if valuesYAML != "" {
 		f := filepath.Join(t.TempDir(), "values.yaml")
 		if err := os.WriteFile(f, []byte(valuesYAML), 0o600); err != nil {

@@ -32,7 +32,7 @@ func TestLiveObjectSemantics(t *testing.T) {
 	// any of this ran.
 	helmInstall(t,
 		"--set-json", `argocd.clusterResourceWhitelist=[{"group":"","kind":"Namespace"}]`,
-		"--set", "argocd.sourceRepos.pattern=https://github.com/acme/{{ tenant }}-gitops",
+		"--set", "argocd.sourceRepos.pattern[0]=https://github.com/acme/{{ tenant }}-gitops",
 	)
 	t.Cleanup(func() {
 		unannotate(t, optInKey, whitelistKey)
@@ -43,9 +43,10 @@ func TestLiveObjectSemantics(t *testing.T) {
 
 	// The load-bearing adoption claim, and the one nothing else can check:
 	// adopting an AppProject that already exists is an in-place rewrite, not a
-	// delete and recreate. If it were a recreate, every project role's
-	// jwtTokens would be destroyed on adoption -- silently, because the
-	// object would still be there afterwards.
+	// delete and recreate. If it were a recreate, the project's
+	// status.jwtTokensByRole would be lost, and ArgoCD validates project
+	// tokens against it, so every token already issued would stop working --
+	// silently, because the object would still be there afterwards.
 	t.Run("an AppProject that already exists is adopted in place", func(t *testing.T) {
 		createBareAppProject(t, fixtureTenantSecondary, "hand made, not by this chart")
 		before := mustGet(t, gvkAppProject, argoNS, fixtureTenantSecondary)
@@ -95,7 +96,7 @@ func TestLiveObjectSemantics(t *testing.T) {
 		}
 	})
 
-	// S19 says the ArgoCD namespace is always a destination. The child
+	// The ArgoCD namespace is always a destination. The child
 	// gotemplate guards against adding it twice when it also carries the tenant
 	// label -- a duplicate destination is not fatal to ArgoCD, but it is a
 	// silent diff on every equivalence comparison.
@@ -175,7 +176,7 @@ func TestLiveObjectSemantics(t *testing.T) {
 		helmUpgrade(t,
 			"--set-json", `argocd.clusterResourceWhitelist=[{"group":"","kind":"Namespace"}]`,
 			"--set-json", `argocd.namespaceResourceBlacklist=[{"group":"","kind":"ResourceQuota"}]`,
-			"--set", "argocd.sourceRepos.pattern=https://github.com/acme/{{ tenant }}-gitops",
+			"--set", "argocd.sourceRepos.pattern[0]=https://github.com/acme/{{ tenant }}-gitops",
 		)
 		waitFor(t, "the new blacklist to reach the live object", func() bool {
 			spec, _ := mustGet(t, gvkAppProject, argoNS, fixtureTenantSecondary).Object["spec"].(map[string]any)
@@ -317,8 +318,8 @@ func TestFailuresStayContained(t *testing.T) {
 	})
 
 	// Same shape, different cause: the parameter resolves against an object
-	// that does not exist at all. Recorded in docs/live-deployment.md from a
-	// manual run; this is that check, automated.
+	// that does not exist at all. First seen in a manual run on a live
+	// cluster; this is that check, automated.
 	t.Run("an IntegrationConfig that does not exist fails the parent and leaves the fleet alone", func(t *testing.T) {
 		uidBefore := mustGet(t, gvkAppProject, argoNS, tenant).GetUID()
 
@@ -408,7 +409,7 @@ func privilegedNamespacesPatch(t *testing.T) string {
 
 // parentOutputs returns the parent's ready and errors roll-ups, keyed by child
 // name. Values are JSON-encoded strings -- a JSONPath output is always a list,
-// and template-operator-v2 stores it encoded (TOV2-6).
+// and template-operator-v2 stores it encoded.
 func parentOutputs(t *testing.T) (ready, errs map[string]string) {
 	t.Helper()
 	parent := get(t, gvkTemplateIn, operatorNS, "mto-argocd-parent")

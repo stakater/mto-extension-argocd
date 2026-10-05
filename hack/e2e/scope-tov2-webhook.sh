@@ -12,11 +12,13 @@
 # a release-time postprocess step, so whether an install is scoped depends on
 # which copy of the chart you used:
 #
-#   published 0.0.6 (ghcr.io/stakater/public/charts/...)  scoped -- checked
-#   charts/ in a tov2 checkout at 8a44194                 NOT scoped
+#   published chart (ghcr.io/stakater/public/charts/...)  scoped -- checked at 0.0.6
+#   charts/ in a tov2 source checkout                      NOT scoped
 #
-# So this script is a no-op on the default TOV2_CHART path and does the repair
-# on the TOV2_SRC path.
+# The requirement: the sync-enforcement webhook must carry a matchConditions
+# filter on the templates.v2.stakater.com/instance label. This script is a
+# no-op on the default TOV2_CHART path, which already meets it, and does the
+# repair on the TOV2_SRC path.
 #
 # Unscoped, the failure is not "a bit broad". It is a permanent, unrecoverable
 # deadlock of the whole cluster, and it happens during install:
@@ -74,7 +76,7 @@ count=$(printf '%s' "${webhooks_json}" | jq '.webhooks | length')
 if [ "${count}" != "1" ]; then
 	echo "expected exactly 1 webhook entry in ${NAME}, found ${count}." >&2
 	echo "This script only knows how to scope .webhooks[0]; another entry could still" >&2
-	echo "carry the unscoped */*/* match that deadlocks the cluster (TOV2-9)." >&2
+	echo "carry the unscoped */*/* match that deadlocks the cluster." >&2
 	echo "Inspect the configuration and update this script before continuing." >&2
 	exit 1
 fi
@@ -86,7 +88,7 @@ if [ -n "${existing}" ]; then
 		echo "sync-enforcement webhook already scoped by matchConditions/${existing}"
 	elif printf '%s' "${existing_expr}" | grep -qF "templates.v2.stakater.com/instance"; then
 		# Scoped, and the filter still keys on the operator's instance label,
-		# so the TOV2-9 deadlock cannot happen -- but a filter that differs
+		# so the cluster-wide deadlock cannot happen -- but a filter that differs
 		# from the one this script carries means the operator's own changed
 		# upstream, and EXPRESSION here is stale.
 		echo "NOTE: sync-enforcement webhook is scoped by matchConditions/${existing}, but its"
@@ -100,7 +102,7 @@ if [ -n "${existing}" ]; then
 		echo "ERROR: sync-enforcement webhook is scoped by matchConditions/${existing}, but its" >&2
 		echo "       expression does not reference the templates.v2.stakater.com/instance label:" >&2
 		echo "         ${existing_expr}" >&2
-		echo "       A filter that matches more than the operator's own objects keeps the TOV2-9" >&2
+		echo "       A filter that matches more than the operator's own objects keeps the" >&2
 		echo "       cluster-deadlock blast radius. Update EXPRESSION here from template-operator-v2" >&2
 		echo "       config/webhook/manifests.yaml and inspect the live configuration." >&2
 		exit 1

@@ -1,0 +1,10 @@
+{
+  "apiVersion": "tenantoperator.stakater.com/v1alpha1",
+  "kind": "Extensions",
+  "metadata": {
+    "name": "pe-extensions"
+  },
+  "spec": {
+    "tenantName": "pe"
+  }
+}

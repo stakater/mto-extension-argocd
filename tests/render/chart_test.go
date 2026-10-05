@@ -3,6 +3,8 @@ package render
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -64,8 +66,27 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 			json:    map[string]string{"scaffolding": "null"},
 			wantErr: "must be a non-empty annotation key"},
 		{name: "unrecognised sourceRepos placeholder",
-			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceRepos.pattern": "https://github.com/acme/${tenant}-gitops"},
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceRepos.pattern[0]": "https://github.com/acme/${tenant}-gitops"},
 			wantErr: "unrecognised placeholder"},
+		// The chart's earlier shape was one string. Without this guard a string
+		// would range as nothing and silently drop every tenant's sourceRepos.
+		{name: "sourceRepos pattern as a plain string",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceRepos.pattern": "https://github.com/acme/{{ tenant }}-gitops"},
+			wantErr: "argocd.sourceRepos.pattern must be a list of strings"},
+		{name: "empty sourceRepos pattern entry",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceRepos.pattern": `["https://github.com/acme/{{ tenant }}-gitops", ""]`},
+			wantErr: "argocd.sourceRepos.pattern contains an empty entry"},
+		{name: "non-string sourceRepos pattern entry",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceRepos.pattern": `["https://github.com/acme/{{ tenant }}-gitops", 123]`},
+			wantErr: "argocd.sourceRepos.pattern entries must be strings"},
+		// ArgoCD's API refuses a project that lists a repo twice, and the two
+		// placeholder spellings expand to the same repo.
+		{name: "duplicate sourceRepos pattern entry",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceRepos.pattern": `["https://github.com/acme/{{ tenant }}-gitops", "https://github.com/acme/{{tenant}}-gitops"]`},
+			wantErr: "lists \"https://github.com/acme/{{ tenant }}-gitops\" twice"},
 		{name: "empty scaffolding annotation key",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "scaffolding.annotations.enabled": ""},
 			wantErr: "scaffolding.annotations.enabled must be a non-empty annotation key"},
@@ -152,7 +173,7 @@ func TestRBACReapVerbsSurviveModeNever(t *testing.T) {
 			for _, target := range []struct {
 				kind, name, apiGroup, resource string
 			}{
-				{"ClusterRole", writeClusterRoleName(t, docs), "argoproj.io", "appprojects"},
+				{"ClusterRole", "mto-extension-argocd-write", "argoproj.io", "appprojects"},
 				{"Role", "mto-extension-argocd-children", "templates.v2.stakater.com", "templateinstances"},
 			} {
 				verbs := roleVerbs(t, docs, target.kind, target.name, target.apiGroup, target.resource)
@@ -245,7 +266,7 @@ func TestRBACCreateFalseOmitsAllRBAC(t *testing.T) {
 }
 
 // Every RBAC object must OUTLIVE the release on teardown, or the operator's
-// finalizers deadlock the whole release in Terminating (TOV2-5). Helm and
+// finalizers deadlock the whole release in Terminating. Helm and
 // ArgoCD honour different annotations, so both must be present -- dropping
 // either silently brings the deadlock back on one of the two teardown paths.
 func TestRBACIsRetainedOnTeardown(t *testing.T) {
@@ -428,11 +449,11 @@ func TestDefaultSyncModeIsStrictAndSafe(t *testing.T) {
 	}
 }
 
-// Only `{{ tenant }}` and `{{tenant}}` are substituted into
-// argocd.sourceRepos.pattern. Any other placeholder form ships its braces
+// Only `{{ tenant }}` and `{{tenant}}` are substituted into each
+// argocd.sourceRepos.pattern entry. Any other placeholder form ships its braces
 // verbatim into a live AppProject's sourceRepos, granting access to a
 // repository that cannot exist -- silently, and it reads correctly at a
-// glance. The pattern is one chart-wide value, so refusing the install is both
+// glance. The patterns are chart-wide values, so refusing the install is both
 // the earliest and the safest place to catch it.
 func TestSourceReposPatternRejectsUnknownPlaceholder(t *testing.T) {
 	for _, tc := range []struct {
@@ -454,8 +475,8 @@ func TestSourceReposPatternRejectsUnknownPlaceholder(t *testing.T) {
 	} {
 		t.Run(tc.pattern, func(t *testing.T) {
 			_, err := HelmTemplate(t, "", map[string]string{
-				"argocd.namespace":           "openshift-gitops",
-				"argocd.sourceRepos.pattern": tc.pattern,
+				"argocd.namespace":              "openshift-gitops",
+				"argocd.sourceRepos.pattern[0]": tc.pattern,
 			})
 			if tc.valid && err != nil {
 				t.Errorf("pattern should be accepted: %v", err)
@@ -514,23 +535,51 @@ func TestParentAggregatesReadyStatusReasonAndErrors(t *testing.T) {
 	}
 }
 
-// writeClusterRoleName finds the AppProject-write ClusterRole. Its name is
-// release-scoped -- fixed cluster-scoped names make a second install anywhere
-// on the cluster fail with "invalid ownership metadata" -- so the test
-// discovers it rather than hardcoding it.
-func writeClusterRoleName(t *testing.T, docs []map[string]any) string {
-	t.Helper()
-	for _, d := range docs {
-		if d["kind"] != "ClusterRole" {
-			continue
+// Every RBAC name is fixed, like the Template names. The chart supports one
+// release per cluster, and a release prefix on only some names would suggest
+// an isolation it does not give. NOTES.txt and the docs name these objects, so
+// a rename must be deliberate.
+//
+// Rendered under two releases in two namespaces. The default release name is
+// "argocd", so a name built from .Release.Name could render as the fixed name
+// under it and pass by accident.
+func TestRBACNamesAreFixed(t *testing.T) {
+	want := []string{
+		"ClusterRole/mto-extension-argocd-observe",
+		"ClusterRole/mto-extension-argocd-write",
+		"ClusterRoleBinding/mto-extension-argocd-observe",
+		"Role/mto-extension-argocd-children",
+		"Role/mto-extension-argocd-integrationconfig-read",
+		"RoleBinding/mto-extension-argocd-children",
+		"RoleBinding/mto-extension-argocd-integrationconfig-read",
+		"RoleBinding/mto-extension-argocd-write",
+	}
+	for _, r := range []struct{ release, namespace string }{
+		{"argocd", "default"},
+		{"other-release", "other-namespace"},
+	} {
+		out, err := HelmTemplateRelease(t, r.release, "", map[string]string{"argocd.namespace": "openshift-gitops"}, "--namespace", r.namespace)
+		if err != nil {
+			t.Fatalf("rendering chart as %s: %v", r.release, err)
 		}
-		name, _ := meta(d)["name"].(string)
-		if strings.HasSuffix(name, "-argocd-write") {
-			return name
+		docs, err := Documents(out)
+		if err != nil {
+			t.Fatalf("decoding chart output: %v", err)
+		}
+		var got []string
+		for _, d := range docs {
+			kind, _ := d["kind"].(string)
+			if !strings.HasSuffix(kind, "Role") && !strings.HasSuffix(kind, "RoleBinding") {
+				continue
+			}
+			name, _ := meta(d)["name"].(string)
+			got = append(got, kind+"/"+name)
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("RBAC objects for release %s in %s\n got  %v\n want %v", r.release, r.namespace, got, want)
 		}
 	}
-	t.Fatal("no AppProject-write ClusterRole in the rendered chart")
-	return ""
 }
 
 // roleVerbs collects the verbs a Role or ClusterRole grants on ONE

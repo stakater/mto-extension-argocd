@@ -3,10 +3,10 @@ Renders ONE tenant's AppProject. Executed by template-operator-v2, not by Helm
 -- the surrounding chart embeds this file verbatim via .Files.Get, so nothing
 here is a Helm template.
 
-Ported from the live-cluster spike, whose manifests produced an
-AppProject byte-identical to ExtensionsArgoCDReconciler's on a live cluster.
-Two deliberate deltas since: the description, and roles[].groups gaining the
-tenant's users.
+Matches ExtensionsArgoCDReconciler's AppProject for the captured tenants in
+tests/render/testdata/equivalence, except for the deliberate differences that
+README.md lists under "Differences from the Extensions controller".
+TestEquivalenceWithExtensionsController asserts each one.
 
 Every list-shaped parameter arrives JSON-encoded. That is mandatory, not
 stylistic: TemplateInstance.spec.parameters[].value is a string, and a
@@ -43,14 +43,23 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
        [{"group":{}}] or ["a",123] would stringify via quote ("map[]", "123")
        and apply cleanly to the live object -- silent corruption. Reject a
        present-but-non-string group/kind or repo here so it fails this one child
-       instead. An absent group/kind is nil and renders "" (core group) -- kept. */ -}}
+       instead. An absent group/kind is nil and renders "" (core group) -- kept.
+       group and kind are read with `index`, not as fields: from v0.0.8
+       template-operator-v2 renders with missingkey=error, and a field read of
+       an absent key would fail the child instead of rendering the core group. */ -}}
 {{- range $i := concat $wl $bl }}
-{{- if and (hasKey $i "group") (not (kindIs "string" $i.group)) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf $i.group) $i.group) }}{{- end }}
-{{- if and (hasKey $i "kind") (not (kindIs "string" $i.kind)) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf $i.kind) $i.kind) }}{{- end }}
+{{- if and (hasKey $i "group") (not (kindIs "string" (index $i "group"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf (index $i "group")) (index $i "group")) }}{{- end }}
+{{- if and (hasKey $i "kind") (not (kindIs "string" (index $i "kind"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf (index $i "kind")) (index $i "kind")) }}{{- end }}
 {{- end }}
+{{- if and $repos (not (kindIs "slice" $repos)) }}{{- fail (printf "sourceRepos must be a JSON list, got %s" (kindOf $repos)) }}{{- end }}
 {{- range $r := $repos }}
 {{- if not (kindIs "string" $r) }}{{- fail (printf "sourceRepos entries must be strings, got %s (%v)" (kindOf $r) $r) }}{{- end }}
 {{- end }}
+{{- /* Duplicates are dropped, first occurrence kept. ArgoCD's API refuses a
+       project that lists a repo twice ("source repository ... already
+       added"), so one duplicate would make every write through ArgoCD fail
+       -- create-token included. Same for groups below. */ -}}
+{{- if $repos }}{{- $repos = mustUniq $repos }}{{- end }}
 {{- /* Reject a near-miss on the purge annotation instead of reading it as
        "retain". "True", "yes", "1" and "on" all look affirmative and would
        silently mean the opposite of what the author intended -- and this one
@@ -96,15 +105,15 @@ spec:
   {{- if $wl }}
   clusterResourceWhitelist:
   {{- range $i := $wl }}
-    - group: {{ $i.group | quote }}
-      kind: {{ $i.kind | quote }}
+    - group: {{ (index $i "group") | quote }}
+      kind: {{ (index $i "kind") | quote }}
   {{- end }}
   {{- end }}
   {{- if $bl }}
   namespaceResourceBlacklist:
   {{- range $i := $bl }}
-    - group: {{ $i.group | quote }}
-      kind: {{ $i.kind | quote }}
+    - group: {{ (index $i "group") | quote }}
+      kind: {{ (index $i "kind") | quote }}
   {{- end }}
   {{- end }}
   roles:
@@ -116,18 +125,31 @@ spec:
       description: >-
         Role that gives {{ if eq $role "owner" }}full{{ else }}{{ $role }}{{ end }} access to all
         resources inside the tenant's namespace to the tenant owner group
+      {{- /* One line per project-scoped resource, not `*`. ArgoCD's API
+             validation refuses `*` as the resource of a project role policy,
+             so with `*` every write through the ArgoCD API -- create-token,
+             delete-token, the UI -- fails with "project resource must be:
+             ...". At runtime `*` and these six lines grant the same access:
+             verified on ArgoCD 3.4.6 with can-i over every resource and
+             action, for an owner and a viewer. */}}
       policies:
-        - {{ printf "p, proj:%s:%s-%s, *, %s, %s/*, allow" $t $t $role $verb $t | quote }}
+      {{- range $res := list "applications" "applicationsets" "logs" "exec" "repositories" "clusters" }}
+        - {{ printf "p, proj:%s:%s-%s, %s, %s, %s/*, allow" $t $t $role $res $verb $t | quote }}
+      {{- end }}
       {{- /* Order is load-bearing for the equivalence diff: generated group,
              then the IntegrationConfig's privileged groups, then the tenant's
              own groups, then its users.
 
-             The users are the one deliberate addition. The generated group only
+             The users are a deliberate addition. The generated group only
              resolves on OpenShift -- syncOCPGroups runs under
              PlatformTypeOpenshift only -- so on vanilla Kubernetes a tenant
-             would otherwise get no ArgoCD access at all. The generated group is
-             kept as well: a chart cannot detect the platform, and keeping it is
-             purely additive, so no OpenShift tenant loses access. */}}
+             whose owners are users depends on these entries. ArgoCD matches
+             them only when argocd-rbac-cm `scopes` includes the claim that
+             carries the user name, usually `email` (README, "Before
+             production"); with the default [groups] they grant nothing. The
+             generated group is kept as well: a chart cannot detect the
+             platform, and keeping it is purely additive, so no OpenShift
+             tenant loses access. */}}
       {{- /* EVERY value below is quoted, and that is load-bearing, not style.
              These strings come from the Tenant and the IntegrationConfig, which
              tenant authors control. Unquoted, a group named
@@ -137,15 +159,13 @@ spec:
              chart's RBAC permits and template-operator-v2 will apply. Benign
              values break too -- an unquoted `true` becomes a boolean and
              `12345` an int, neither of which ArgoCD accepts as a group. */}}
+      {{- /* Duplicates are dropped, first occurrence kept, so the order
+             above holds. ArgoCD's API refuses a role that lists a group twice
+             ("group ... already exists for role"), and a privileged group
+             that a tenant also lists is ordinary configuration. */}}
+      {{- $groups := concat (list (printf "%s-%s-group-%s" $t $role $hash)) ($priv | default list) (index $tg $role | default list) (index $tu $role | default list) | mustUniq }}
       groups:
-        - {{ printf "%s-%s-group-%s" $t $role $hash | quote }}
-      {{- range $g := $priv }}
+      {{- range $g := $groups }}
         - {{ $g | quote }}
-      {{- end }}
-      {{- range $g := (index $tg $role) }}
-        - {{ $g | quote }}
-      {{- end }}
-      {{- range $u := (index $tu $role) }}
-        - {{ $u | quote }}
       {{- end }}
   {{- end }}

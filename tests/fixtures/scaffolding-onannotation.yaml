@@ -6,7 +6,8 @@
 #
 # That matters more here than for any other mode. template-operator-v2 reaps
 # orphans, so a filter that silently stops matching does not merely fail to
-# create -- it DELETES every AppProject the chart manages.
+# create -- it takes every AppProject the chart manages out of management, and
+# DELETES them on template-operator-v2 v0.0.6 and earlier.
 #
 # Only `opted-in` should appear in the golden:
 #   near-miss-True / near-miss-yes  the value must be exactly "true"

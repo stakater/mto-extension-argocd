@@ -14,7 +14,7 @@ on:
     # tests/render/testdata/ and cannot be regenerated, so nothing here may
     # cover it.
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
       - 'examples/**'
 
 jobs:

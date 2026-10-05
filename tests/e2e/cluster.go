@@ -41,7 +41,7 @@ const (
 	// un-annotated, while the topology tests annotate it and remove the
 	// annotation again on their way out.
 	fixtureTenantSecondary = "e2e-beta"
-	// A tenant with no namespaces at all (S21). Its AppProject must still be
+	// A tenant with no namespaces at all. Its AppProject must still be
 	// created, with the ArgoCD namespace as its only destination.
 	fixtureTenantEmpty = "e2e-gamma"
 
@@ -68,7 +68,7 @@ var fixtureNamespaces = map[string]string{
 
 // expectedDestinations is what fixtureTenant's AppProject should list, in no
 // particular order: its two ordinary namespaces plus the ArgoCD namespace,
-// which is always a destination (S19). The privileged one is absent, which is
+// which is always a destination. The privileged one is absent, which is
 // the whole point of the fixture.
 func expectedDestinations() []string {
 	return []string{"e2e-alpha-dev", "e2e-alpha-prod", argoNS}
@@ -138,9 +138,9 @@ func teardownFixtures() {
 // Every flake this suite has had that was not a genuine finding started this
 // way, so the fixtures begin by clearing it rather than by hoping.
 //
-// Order matters and is the same one NOTES.txt gives operators: drain the
-// children before removing the release, or the RBAC goes first and each child's
-// finalizer blocks forever (TOV2-5).
+// The children are drained before the release is removed. The chart keeps its
+// RBAC on uninstall, so the reverse order would also finish, but draining first
+// makes a failed reap show here instead of as a stuck object in the next test.
 func resetCluster(ctx context.Context) error {
 	parent := &unstructured.Unstructured{}
 	parent.SetGroupVersionKind(gvkTemplateIn)
@@ -289,7 +289,7 @@ func releaseFixtureAppProjects(ctx context.Context) error {
 			if time.Now().After(deadline) {
 				// Last resort, and only ever for a leftover: an object stuck
 				// in Terminating on a finalizer whose operator is no longer
-				// managing it can never go on its own (TOV2-5). Clearing it
+				// managing it can never go on its own. Clearing it
 				// here cannot hide an in-run defect -- the tests assert
 				// teardown behaviour themselves, and this only runs before the
 				// first test and after the last.

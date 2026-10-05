@@ -14,21 +14,19 @@
 # namespace, so pointing it somewhere new fails the install unless you create
 # that namespace first.
 #
-# In practice one release per cluster while rbac.create is true. The Template
-# and Role names are fixed (mto-argocd-parent, mto-argocd-child,
-# mto-extension-argocd-children, mto-extension-argocd-integrationconfig-read),
-# so a second release sharing operatorNamespace fails with "invalid ownership
-# metadata" -- and even in different operatorNamespaces, both releases would
-# read the same singleton IntegrationConfig and collide on the fixed-name
-# integrationconfig-read Role in ITS namespace. The cluster-scoped RBAC names
-# are release-prefixed, but that alone does not make a second install safe.
+# One release per cluster. The Template and RBAC names are fixed
+# (mto-argocd-parent, mto-argocd-child, and mto-extension-argocd-observe,
+# -write, -children and -integrationconfig-read), so a second release fails
+# with "invalid ownership metadata" -- and even in different
+# operatorNamespaces, both releases would read the same singleton
+# IntegrationConfig.
 operatorNamespace: multi-tenant-operator
 
 argocd:
   # REQUIRED, and enforced by values.schema.json with minLength 1.
   #
   # The namespace ArgoCD runs in. Every AppProject is created here, and it is
-  # always present in every tenant's destinations (S19), including when it
+  # always present in every tenant's destinations, including when it
   # matches a privileged pattern.
   #
   # A blank value does NOT render zero children -- $argoNs never gates emission.
@@ -63,17 +61,20 @@ argocd:
     # shared default: one org-wide value lets every tenant deploy from every
     # other tenant's repos, so the only shareable form is a per-tenant pattern.
     #
-    # `{{ tenant }}` is expanded to the tenant's name. A pattern with no
+    # A list. Each entry becomes one sourceRepos entry, in order, with
+    # `{{ tenant }}` expanded to the tenant's name. An entry with no
     # placeholder is simply a literal, which is why no separate `literal:` key
     # exists yet.
     #
-    #   pattern: https://github.com/acme/{{ tenant }}-gitops
+    #   pattern:
+    #     - https://github.com/acme/{{ tenant }}-gitops
+    #     - https://github.com/acme/{{ tenant }}-charts
     #
     # Ships EMPTY on purpose: a shipped default would add a field to every
-    # existing AppProject that did not have one and break the Phase 2
-    # byte-identical diff. A Tenant may override with the source-repos
-    # annotation.
-    pattern: ""
+    # existing AppProject that did not have one and break the migration diff
+    # against the old controller's output. A Tenant may override with the
+    # source-repos annotation.
+    pattern: []
 
 # Which Tenants get an AppProject.
 scaffolding:
@@ -152,9 +153,7 @@ sync:
   #
   # Teardown is not blocked by the webhook: it allows the delete once the
   # owning TemplateInstance is itself being deleted, so descaffolding a tenant
-  # and uninstalling are both permitted -- verified on the same cluster. They
-  # still have to be done in the right ORDER, for an unrelated reason: see
-  # NOTES.txt and TOV2-5.
+  # and uninstalling are both permitted -- verified on the same cluster.
   #
   # Two costs, both real:
   #
@@ -205,9 +204,11 @@ sync:
     # only a mirror, and status is stripped automatically; the spec field is
     # not. Without this exemption strict denies a supported ArgoCD workflow.
     #
-    # Exempting it is safe: this chart never renders jwtTokens, and
-    # server-side apply only owns the fields it sets, so tokens survive every
-    # re-render regardless.
+    # Exempting it is safe: this chart never renders jwtTokens. The next
+    # re-render does remove this spec copy -- `roles` is one atomic list, so
+    # the apply replaces it whole -- but the token stays valid: ArgoCD checks
+    # project tokens against status.jwtTokensByRole, which template-operator-v2
+    # never touches. Verified on ArgoCD 3.4.6, revocation included.
     - spec.roles[*].jwtTokens
 
 # Default for whether deleting a Tenant (or descaffolding it) deletes its
@@ -219,14 +220,12 @@ sync:
 # templates.v2.stakater.com/deletion-policy: Orphan on every AppProject it
 # renders with purge disabled.
 #
-#   8a44194 and later  honoured. Descaffolding RELEASES the AppProject:
+#   v0.0.7 and later   honoured. Descaffolding RELEASES the AppProject:
 #                      the object stays, and comes back with no finalizer and
 #                      no ownership labels, so a human can delete it.
 #   v0.0.6 and earlier  ignored. Every rendered resource is deleted
-#                      unconditionally on child deletion (TOV2-1), so here the
-#                      value documents intent only. Both measured: v0.0.6 is
-#                      the current PUBLISHED release, and v0.0.5 is what the
-#                      live cluster runs.
+#                      unconditionally on child deletion, so here the
+#                      value documents intent only.
 #
 # `make e2e-kind` reports which of the two your operator does.
 onDeletePurgeAppProject: false

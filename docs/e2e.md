@@ -31,7 +31,7 @@ make e2e-kind TOV2_CHART=oci://ghcr.io/stakater/charts/template-operator-v2 \
 
 # a sibling checkout: builds the image, loads it into kind, installs that
 # checkout's chart. The only way to test an UNRELEASED operator against this
-# chart -- which is how the retain behaviour in TOV2-1 was confirmed fixed.
+# chart -- which is how the retain behaviour was confirmed fixed.
 make e2e-kind TOV2_SRC=../template-operator-v2
 ```
 
@@ -70,9 +70,28 @@ Tear down with `make cluster-delete`.
 ## Running against a real cluster instead
 
 The suite has a second mode that borrows an existing tenant on a licensed
-cluster, which is what proves the chart works *alongside* MTO. That is
-documented in [live-deployment.md](live-deployment.md#re-running-e2e-against-this-install),
-and the package comment in [tests/e2e](../tests/e2e/e2e_test.go) spells out the
+cluster, which is what proves the chart works *alongside* MTO.
+
+The suite installs its own release, `mto-argocd-e2e`. The chart supports one
+release per cluster, so first uninstall any existing release and delete the
+RBAC it keeps (the cleanup commands that NOTES.txt prints).
+
+`E2E_OPERATOR_NAMESPACE` is where the suite installs the chart, and also where
+it looks for the IntegrationConfig. It defaults to `E2E_ARGO_NAMESPACE`, so set
+it to the namespace that holds the IntegrationConfig, usually
+`multi-tenant-operator`:
+
+```bash
+E2E=1 \
+KUBE_CONTEXT="<your-kube-context>" \
+E2E_TENANT=<an-existing-tenant> \
+E2E_ARGO_NAMESPACE=<argocd-namespace> \
+E2E_OPERATOR_NAMESPACE=<integrationconfig-namespace> \
+E2E_TOV2_SA=system:serviceaccount:<tov2-namespace>:template-operator-v2 \
+make e2e-test
+```
+
+The package comment in [tests/e2e](../tests/e2e/e2e_test.go) spells out the
 difference. Tests that need to create tenants or namespaces skip there, and say
 why.
 
@@ -99,14 +118,14 @@ one is actually for:
 | Area | Where | What it pins |
 |---|---|---|
 | Lifecycle | `TestLifecycle` | install → opt in → break an annotation → fix it → identical upgrade → descaffold → purge → uninstall, in dependency order against one release |
-| Drift protection | `TestLifecycle` | `strict` refuses an out-of-band DELETE **and** an out-of-band edit, while still allowing `argocd proj role create-token` — the `spec.roles[*].jwtTokens` exemption, checked against the live webhook rather than the rendered value |
+| Drift protection | `TestLifecycle` | `strict` refuses an out-of-band DELETE **and** an out-of-band edit, while still allowing the `spec.roles[*].jwtTokens` write that `argocd proj role create-token` makes — checked against the live webhook rather than the rendered value. The write goes through the Kubernetes API, so ArgoCD's own project validation is covered by the render tests, not here |
 | Fleet behaviour | `TestManagedFleet` | privileged namespaces never become destinations, a tenant with no namespaces still gets a usable project, a namespace event re-renders exactly one tenant, a tenant nobody opted in gets nothing, role group order |
 | Scaffolding modes | `TestScaffoldingModes`, `TestScaffoldingModeNarrowing` | `OnLabel` reads the label and ignores the annotation; `Never` stops rendering but keeps the reap verbs, or every child finalizer deadlocks; narrowing a mode releases or deletes, and which one it does is reported |
 | Live object semantics | `TestLiveObjectSemantics` | an AppProject that already exists is adopted **in place** (same UID — migration's load-bearing claim), a namespace moves cleanly between tenants, the ArgoCD namespace is listed once, an explicit `[]` strips the field from the live object, the sourceRepos pattern expands per tenant, a values change updates in place |
 | Blast radius | `TestFailuresStayContained` | a malformed annotation fails one tenant and moves no other object; an unreadable or missing IntegrationConfig fails the parent and leaves the fleet running; deleting a Tenant reaps only its own child; the parent's roll-up names the broken tenant |
 | ArgoCD itself | `TestArgoCDHonoursTheRenderedProject` | ArgoCD refuses an Application outside the rendered destinations and accepts one inside them |
 | RBAC | `TestLeastPrivilegeDelta` | the chart grants exactly five permissions and no others, measured as a before/after delta |
-| Upstream characterization | `TestRevertModeWedgesOnDelete` | the `revert` wedge (TOV2-2), reported either way so a fix upstream is visible |
+| Upstream characterization | `TestRevertModeWedgesOnDelete` | the `revert` wedge, reported either way so a fix upstream is visible |
 
 **What is deliberately NOT here.** Chart values validation — a blank
 `argocd.namespace`, a bogus `scaffolding.mode`, `strict` without its exemptions,
@@ -119,7 +138,7 @@ Two assertions are **version-dependent** and report rather than fail: whether
 descaffolding retains or deletes an AppProject, and whether `revert` still
 wedges. Both are properties of the operator build underneath, not of this chart,
 and the run says which one it saw. Against an operator that honours the retain
-annotation (8a44194+, e.g. `TOV2_SRC=...`), set `E2E_EXPECT_RETAIN=1` to turn
+annotation (v0.0.7+, e.g. `TOV2_CHART_VERSION=0.0.7`), set `E2E_EXPECT_RETAIN=1` to turn
 the retain report into an assertion — otherwise a chart regression in release
 semantics could hide behind "not implemented in this build".
 
@@ -129,7 +148,8 @@ Worth knowing before treating a green run as "shipped":
 
 - **Nothing here runs multi-tenant-operator.** Its webhooks admitting what the
   chart writes, and its generated group names matching what the roles assume,
-  are covered only by the live OpenShift run.
+  are covered only by a run against a real cluster; see
+  [Running against a real cluster instead](#running-against-a-real-cluster-instead).
 - **Nobody logs in.** The three roles and their policies are rendered and
   accepted by ArgoCD, but no member of those groups has been authenticated
   against them. That needs SSO and ingress.

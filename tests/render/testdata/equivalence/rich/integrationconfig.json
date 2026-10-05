@@ -2,9 +2,6 @@
   "apiVersion": "tenantoperator.stakater.com/v1beta1",
   "kind": "IntegrationConfig",
   "metadata": {
-    "labels": {
-      "multi-tenant-operator/predicate": ""
-    },
     "name": "tenant-operator-config",
     "namespace": "stakater-tenant-operator"
   },
@@ -16,6 +13,10 @@
         }
       },
       "privileged": {
+        "groups": [
+          "review-platform-admins-b",
+          "review-platform-admins-a"
+        ],
         "namespaces": [
           "^default$",
           "^openshift.*",
@@ -30,7 +31,14 @@
           "^trace-demo-obs$",
           "^sos-load-test$",
           "^pe-load-test$",
-          "^grafana-operator$"
+          "^grafana-operator$",
+          "^vault$",
+          "^vault-config$",
+          "^vault-config-operator$",
+          "^chart-repo$",
+          "^keycloak$",
+          "^dex$",
+          "t-c"
         ],
         "serviceAccounts": [
           "^system:serviceaccount:openshift.*",
@@ -60,19 +68,6 @@
         }
       }
     },
-    "components": {
-      "console": false,
-      "dex": {
-        "mode": "Managed"
-      },
-      "ingress": {
-        "console": {},
-        "dex": {},
-        "finopsGateway": {},
-        "gateway": {}
-      },
-      "showback": false
-    },
     "integrations": {
       "argocd": {
         "clusterResourceWhitelist": [
@@ -93,11 +88,6 @@
           }
         ]
       }
-    },
-    "metadata": {
-      "groups": {},
-      "namespaces": {},
-      "sandboxes": {}
     }
   }
 }

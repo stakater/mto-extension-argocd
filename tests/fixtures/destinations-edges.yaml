@@ -4,13 +4,13 @@
 #   shares-argo-ns  The ArgoCD namespace itself carries this tenant's label and
 #                   is not privileged, so the parent already put it in the
 #                   namespace list. The child appends the ArgoCD namespace
-#                   unconditionally (S19 -- it must be a destination even when
+#                   unconditionally (it must be a destination even when
 #                   privileged), which without a guard lists it twice. A
 #                   duplicate destination is not fatal to ArgoCD, but it churns
 #                   the object on every apply and makes the equivalence diff
 #                   unreadable.
 #
-#   no-namespaces   S21. A tenant with zero labelled namespaces still gets an
+#   no-namespaces   A tenant with zero labelled namespaces still gets an
 #                   AppProject, with the ArgoCD namespace as its only
 #                   destination. It must NOT be skipped: openbao's parent skips
 #                   namespace-less tenants because its child resolves workloads

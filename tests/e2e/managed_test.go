@@ -55,7 +55,7 @@ func TestManagedFleet(t *testing.T) {
 			get(t, gvkAppProject, argoNS, fixtureTenantEmpty) != nil
 	})
 
-	// D1 -- the path with a cross-tenant-exposure consequence, and the reason
+	// The path with a cross-tenant-exposure consequence, and the reason
 	// this cluster exists. `openshift-e2e-alpha` carries the tenant's label and
 	// matches ^openshift-* in the IntegrationConfig, so it must NOT be a
 	// destination. On a licensed cluster MTO's webhook refuses to let you
@@ -75,7 +75,7 @@ func TestManagedFleet(t *testing.T) {
 		}
 	})
 
-	// S21. A tenant with no namespaces must still get a usable project rather
+	// A tenant with no namespaces must still get a usable project rather
 	// than be skipped, and the ArgoCD namespace is what makes it usable.
 	t.Run("a tenant with no namespaces still gets a project", func(t *testing.T) {
 		got := destinationsOf(t, fixtureTenantEmpty)
@@ -130,7 +130,7 @@ func TestManagedFleet(t *testing.T) {
 		}
 	})
 
-	// C4's group order, read off a live object rather than a rendered file. The
+	// The role group order, read off a live object rather than a rendered file. The
 	// privileged group comes from the IntegrationConfig the parent actually
 	// read, so this also proves the objectFieldRef resolved the right object.
 	t.Run("roles carry the generated group, the privileged group and the tenant's own", func(t *testing.T) {
@@ -161,8 +161,8 @@ func TestManagedFleet(t *testing.T) {
 
 // TestArgoCDHonoursTheRenderedProject closes the loop that every other layer
 // stops one step short of: an AppProject existing is not the same as ArgoCD
-// enforcing it. Reproduced by hand once on the live cluster
-// (docs/live-deployment.md); this is that check, automated.
+// enforcing it. Reproduced by hand once on a live OpenShift cluster; this is
+// that check, automated.
 func TestArgoCDHonoursTheRenderedProject(t *testing.T) {
 	requireManagedTenants(t)
 	startClean(t)
@@ -176,8 +176,8 @@ func TestArgoCDHonoursTheRenderedProject(t *testing.T) {
 	// Without sourceRepos the project permits NO repository, and every
 	// Application under it fails on the repo before the destination is even
 	// considered -- which would make the negative case below pass for the
-	// wrong reason. The finding that this is the shipping default is recorded
-	// in docs/live-deployment.md.
+	// wrong reason. This is the shipping default; see "Before production" in
+	// README.md.
 	annotate(t, sourceReposKey, `["https://github.com/argoproj/argocd-example-apps"]`)
 	annotate(t, optInKey, "true")
 	waitFor(t, "AppProject to appear", func() bool { return get(t, gvkAppProject, argoNS, tenant) != nil })
@@ -217,7 +217,7 @@ func TestArgoCDHonoursTheRenderedProject(t *testing.T) {
 // chart value, and its own tenants because Always scaffolds all of them.
 //
 // The documented rule used to be "narrowing the mode is a delete". With
-// template-operator-v2 honouring the retain annotation (TOV2-1) it is a
+// template-operator-v2 v0.0.7+ honouring the retain annotation it is a
 // RELEASE: the child TemplateInstance goes, the AppProject stays and stops
 // being managed. Both are asserted -- the child always disappears, and which of
 // the two things happens to the AppProject is reported, because it is a
@@ -271,7 +271,7 @@ func TestScaffoldingModeNarrowing(t *testing.T) {
 	case kept == len(all):
 		t.Logf("retain honoured: narrowing the mode released %d AppProjects without deleting them", kept)
 	case deleted == len(all):
-		t.Logf("TOV2-1 NOT IMPLEMENTED in this build: narrowing scaffolding.mode deleted %d AppProjects", deleted)
+		t.Logf("retain NOT IMPLEMENTED in this build (tov2 v0.0.6 or earlier): narrowing scaffolding.mode deleted %d AppProjects", deleted)
 	default:
 		t.Errorf("inconsistent: %d AppProjects kept, %d deleted — the same policy produced both", kept, deleted)
 	}

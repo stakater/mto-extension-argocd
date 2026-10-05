@@ -3,12 +3,19 @@
 // produces rather than on the Template CR that carries it.
 //
 // This is a deliberate mirror of the operator's renderer, not an approximation
-// of it. template-operator-v2's TemplateInstance controller does exactly this:
+// of it. template-operator-v2's TemplateInstance controller does exactly this
+// from v0.0.8:
 //
-//	template.New("template").Funcs(SafeSprigFuncs()).Parse(templateStr)
+//	template.New("template").Funcs(SafeSprigFuncs()).Option("missingkey=error").Parse(templateStr)
 //
-// and its SafeSprigFuncs (internal/controller/controller_utils.go, inspected
-// at tov2 v0.0.6) is sprig.TxtFuncMap() with three entries deleted. Both live
+// v0.0.7 and earlier omit the missingkey option. The tests use the strict form
+// because it covers both: the option changes only what happens when a template
+// reads a map key that does not exist, so a gotemplate that never does renders
+// byte-identical output either way, and one that does fails here.
+//
+// SafeSprigFuncs (internal/controller/controller_utils.go, inspected at tov2
+// v0.0.6 and unchanged through v0.0.8) is sprig.TxtFuncMap() with three
+// entries deleted. Both live
 // under internal/ in a private module, so they cannot be imported -- but sprig
 // is public, and safeSprigFuncs below reproduces the engine exactly.
 //
@@ -59,7 +66,7 @@ type Instance struct {
 // Gotemplate renders one gotemplate against one parameter set, exactly as
 // template-operator-v2 would. An error here is an error on cluster.
 func Gotemplate(gotmpl string, params map[string]any, instance Instance) (string, error) {
-	t, err := template.New("template").Funcs(safeSprigFuncs()).Parse(gotmpl)
+	t, err := template.New("template").Funcs(safeSprigFuncs()).Option("missingkey=error").Parse(gotmpl)
 	if err != nil {
 		return "", fmt.Errorf("parse: %w", err)
 	}

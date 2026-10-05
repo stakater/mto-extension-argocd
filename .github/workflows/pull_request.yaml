@@ -5,11 +5,10 @@ on:
     branches: [main]
     # The equivalence test reads its reference data from tests/render/testdata/
     # -- the captured output of the Go controller, which cannot be regenerated
-    # once ArgoCD is uninstalled from the cluster that produced it
-    # (docs/live-deployment.md records it still running there for now). It sits
-    # under tests/, so no entry below can let a change to it skip a job.
+    # once the controller is removed. It sits under tests/, so no entry below
+    # can let a change to it skip a job.
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
       - 'examples/**'
 
 jobs:

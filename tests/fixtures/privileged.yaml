@@ -1,4 +1,4 @@
-# D1 -- privileged namespace exclusion.
+# Privileged namespace exclusion.
 #
 # This is the first test in the repo on purpose. It is the only untested path
 # whose failure mode is cross-tenant exposure: a namespace that should have
@@ -16,7 +16,7 @@
 # accident.
 #
 # Also pinned here:
-#   S19 -- the ArgoCD namespace is a destination even though it matches
+#   the ArgoCD namespace is a destination even though it matches
 #          ^openshift.* and would otherwise be filtered out.
 #   the privileged groups from the IntegrationConfig land in every role, after
 #          the generated group and before the tenant's own.
@@ -97,6 +97,6 @@ cluster:
     - metadata:
         name: default
     # The ArgoCD namespace itself matches ^openshift.* -- and is still a
-    # destination for both tenants (S19).
+    # destination for both tenants.
     - metadata:
         name: openshift-gitops

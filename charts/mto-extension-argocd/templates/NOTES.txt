@@ -49,7 +49,7 @@ to need an ordered manual dance.
 
 What happens to the AppProjects this release manages depends on the operator
 build and on onDeletePurgeAppProject. With the default (retain) on
-template-operator-v2 8a44194 / v0.0.7 and later they are RELEASED and survive;
+template-operator-v2 v0.0.7 and later they are RELEASED and survive;
 on v0.0.6 and earlier they are DELETED, because retain is not enforceable there.
 
 The retained RBAC is deliberately left behind -- it is harmless once the
@@ -61,8 +61,9 @@ reinstall. Remove it explicitly only when you want it gone:
     -n {{ .Values.operatorNamespace }}
   kubectl delete role,rolebinding mto-extension-argocd-integrationconfig-read \
     -n {{ .Values.integrationConfig.namespace }}
+  kubectl delete rolebinding mto-extension-argocd-write \
+    -n {{ (.Values.argocd).namespace }}
 
 If you are reinstalling, wait for `Template/mto-argocd-parent` to disappear
 first. `helm uninstall` returns before template-operator-v2 releases its
-finalizer, and an install in that window fails with an ownership-metadata error
-(TOV2-4).
+finalizer, and an install in that window fails with an ownership-metadata error.

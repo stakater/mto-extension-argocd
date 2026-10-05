@@ -48,8 +48,13 @@
           "additionalProperties": false,
           "properties": {
             "pattern": {
-              "type": "string",
-              "description": "Per-tenant repo pattern; {{ tenant }} is expanded to the tenant name. Empty means no sourceRepos unless a Tenant sets the annotation."
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Per-tenant repo patterns, one sourceRepos entry each; {{ tenant }} is expanded to the tenant name. Empty means no sourceRepos unless a Tenant sets the annotation."
             }
           },
           "required": [
@@ -179,7 +184,7 @@
     },
     "onDeletePurgeAppProject": {
       "type": "boolean",
-      "description": "Default for whether deleting or descaffolding a Tenant deletes its AppProject; false retains. Overridable per Tenant with the on-delete-purge annotation. Required and boolean so an explicit null is refused at install time -- helm strips explicitly-null keys before validation, so the required marker catches it here and _helpers.tpl repeats the check for schema-skipping render paths."
+      "description": "Default for whether deleting or descaffolding a Tenant deletes its AppProject; false retains, on template-operator-v2 v0.0.7 and later. Overridable per Tenant with the on-delete-purge annotation. Required and boolean so an explicit null is refused at install time -- helm strips explicitly-null keys before validation, so the required marker catches it here and _helpers.tpl repeats the check for schema-skipping render paths."
     },
     "rbac": {
       "type": "object",

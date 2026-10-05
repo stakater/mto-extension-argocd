@@ -1,10 +1,12 @@
 package render
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -43,6 +45,14 @@ func seed(t *testing.T) int64 {
 //  5. every role's first group is the generated one, so the ordering the
 //     equivalence diff depends on cannot drift
 //  6. no destination belongs to another tenant
+//  7. every policy names its own role and a resource ArgoCD's API accepts for
+//     a project role -- never `*`, which makes every ArgoCD API write to the
+//     project fail validation
+//  8. no role lists a group twice and no repo is listed twice, while every
+//     configured group, user and repo is kept, in order. ArgoCD's API refuses
+//     a project with either duplicate, so one would break every ArgoCD API
+//     write to it. The generator overlaps privileged groups, tenant groups
+//     and users, and repeats repos, so the dedup is exercised.
 func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 	rng := rand.New(rand.NewSource(seed(t)))
 	const argoNS = "argo-cd"
@@ -50,6 +60,18 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		t.Run(fmt.Sprintf("case-%02d", i), func(t *testing.T) {
 			tenants, namespaces, privileged := randomCluster(rng, argoNS)
+			// g0 and e0 are also tenant groups half the time, so a privileged
+			// group the tenant lists again is a common case here.
+			privGroups := []any{}
+			if rng.Intn(2) == 0 {
+				privGroups = []any{"g0", "e0", "platform-admins"}
+			}
+			byName := map[string]map[string]any{}
+			for _, tn := range tenants {
+				tm, _ := tn.(map[string]any)
+				n, _ := tm["metadata"].(map[string]any)["name"].(string)
+				byName[n] = tm
+			}
 
 			rendered, childErrs := TwoStage(t, Fixture{
 				Values: map[string]any{
@@ -61,7 +83,7 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 					"namespaces": namespaces,
 					"integrationConfig": map[string]any{
 						"accessControl": map[string]any{
-							"privileged": map[string]any{"namespaces": privileged, "groups": []any{}},
+							"privileged": map[string]any{"namespaces": privileged, "groups": privGroups},
 						},
 					},
 				},
@@ -108,6 +130,38 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 					if first, _ := groups[0].(string); !strings.HasPrefix(first, name+"-"+suffix+"-group-") {
 						t.Errorf("%s/%v: first group is %q, want the generated one", name, rm["name"], first)
 					}
+					policies, _ := rm["policies"].([]any)
+					if len(policies) != len(projectScopedResources) {
+						t.Errorf("%s/%v: %d policies, want %d", name, rm["name"], len(policies), len(projectScopedResources))
+					}
+					for _, p := range policies {
+						ps, _ := p.(string)
+						f := strings.Split(ps, ", ")
+						if len(f) != 6 || f[1] != fmt.Sprintf("proj:%s:%v", name, rm["name"]) || !slices.Contains(projectScopedResources, f[2]) {
+							t.Errorf("%s/%v: policy %q is not a valid project role policy for this role", name, rm["name"], ps)
+						}
+					}
+					ac, _ := byName[name]["spec"].(map[string]any)["accessControl"].(map[string]any)
+					block, _ := ac[map[string]string{"owner": "owners", "edit": "editors", "view": "viewers"}[suffix]].(map[string]any)
+					want := uniqStrings(slices.Concat(
+						[]any{groups[0]}, privGroups, anyList(block["groups"]), anyList(block["users"])))
+					if got := uniqStrings(groups); len(got) != len(groups) || !slices.Equal(got, want) {
+						t.Errorf("%s/%v: groups %v, want %v", name, rm["name"], groups, want)
+					}
+				}
+
+				annos, _ := byName[name]["metadata"].(map[string]any)["annotations"].(map[string]any)
+				var wantRepos []string
+				if raw, ok := annos[sourceReposAnnotation].(string); ok {
+					var list []any
+					if err := json.Unmarshal([]byte(raw), &list); err != nil {
+						t.Fatalf("%s: generator wrote invalid JSON %q: %v", name, raw, err)
+					}
+					wantRepos = uniqStrings(list)
+				}
+				gotRepos, _ := sp["sourceRepos"].([]any)
+				if g := uniqStrings(gotRepos); len(g) != len(gotRepos) || !slices.Equal(g, wantRepos) {
+					t.Errorf("%s: sourceRepos %v, want %v", name, gotRepos, wantRepos)
 				}
 
 				dests := destinationNames(sp)
@@ -270,31 +324,35 @@ func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
 }
 
 // Scale. The parent ranges over every Tenant and every Namespace in the
-// cluster on each reconcile, so its cost is the thing that grows -- one
-// gotemplate execution over N tenants x M namespaces, not N executions.
+// cluster on each reconcile, and re-renders on every Namespace event, so its
+// cost is the thing that grows.
 //
-// This asserts correctness at scale (every tenant renders, every destination
-// count holds) and logs the elapsed time. It makes no timing assertion --
-// that would be flaky across machines -- so an accidentally quadratic change
-// in the filter loop shows up as an obvious jump in the logged time, not as
-// a red test.
+// The shape is a large real cluster: 1000 tenants with 3 namespaces each, 7000
+// namespaces that belong to no tenant, and 15 privileged patterns, one of which
+// removes a namespace from every 20th tenant. With the single-pass parent the
+// whole timed block -- helm template, the parent and 1000 children -- takes
+// under a second; scanning the Namespace list once per tenant took over 20 s
+// on the same input. The ceiling sits far from both, so it does not flake on a
+// slow runner and still fails on an accidentally quadratic loop.
 func TestScaleManyTenants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("scale test skipped under -short")
 	}
 	const (
-		tenants   = 200
-		perTenant = 5
+		tenants   = 1000
+		perTenant = 3
+		others    = 7000
 		argoNS    = "argo-cd"
+		ceiling   = 10 * time.Second
 	)
 
 	var ts, ns []any
 	for i := 0; i < tenants; i++ {
-		name := fmt.Sprintf("t%03d", i)
+		name := fmt.Sprintf("t%04d", i)
 		ts = append(ts, map[string]any{
 			"metadata": map[string]any{"name": name},
 			"spec": map[string]any{"accessControl": map[string]any{
-				"owners": map[string]any{"groups": []any{name + "-owners"}},
+				"owners": map[string]any{"groups": []any{name + "-owners"}, "users": []any{name + "@example.com"}},
 			}},
 		})
 		for j := 0; j < perTenant; j++ {
@@ -303,6 +361,22 @@ func TestScaleManyTenants(t *testing.T) {
 				"labels": map[string]any{"stakater.com/tenant": name},
 			}})
 		}
+		if i%20 == 0 {
+			ns = append(ns, map[string]any{"metadata": map[string]any{
+				"name":   name + "-ci",
+				"labels": map[string]any{"stakater.com/tenant": name},
+			}})
+		}
+	}
+	for i := 0; i < others; i++ {
+		ns = append(ns, map[string]any{"metadata": map[string]any{
+			"name":   fmt.Sprintf("shared-%05d", i),
+			"labels": map[string]any{"kubernetes.io/metadata.name": fmt.Sprintf("shared-%05d", i)},
+		}})
+	}
+	privileged := []any{"^kube.*", "^openshift.*", "^default$", "-ci$"}
+	for i := len(privileged); i < 15; i++ {
+		privileged = append(privileged, fmt.Sprintf("^platform-%02d$", i))
 	}
 
 	start := time.Now()
@@ -315,7 +389,7 @@ func TestScaleManyTenants(t *testing.T) {
 			"tenants":    ts,
 			"namespaces": ns,
 			"integrationConfig": map[string]any{
-				"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{"^kube.*"}, "groups": []any{}}},
+				"accessControl": map[string]any{"privileged": map[string]any{"namespaces": privileged, "groups": []any{}}},
 			},
 		},
 	})
@@ -334,11 +408,17 @@ func TestScaleManyTenants(t *testing.T) {
 	for _, ap := range docs {
 		name, _ := ap["metadata"].(map[string]any)["name"].(string)
 		sp, _ := ap["spec"].(map[string]any)
+		// The -ci namespace is privileged, so every tenant ends with its three
+		// ordinary namespaces plus the ArgoCD namespace.
 		if got := len(destinationNames(sp)); got != perTenant+1 {
 			t.Errorf("%s: %d destinations, want %d", name, got, perTenant+1)
 		}
 	}
-	t.Logf("%d tenants x %d namespaces rendered in %s", tenants, perTenant, elapsed.Round(time.Millisecond))
+	t.Logf("%d tenants, %d namespaces, %d privileged patterns rendered in %s",
+		tenants, len(ns), len(privileged), elapsed.Round(time.Millisecond))
+	if elapsed > ceiling {
+		t.Errorf("render took %s, ceiling %s: the parent is scanning the Namespace list once per tenant again", elapsed.Round(time.Millisecond), ceiling)
+	}
 }
 
 // ---------------------------------------------------------------- generators
@@ -352,10 +432,26 @@ func randomCluster(rng *rand.Rand, argoNS string) (tenants, namespaces, privileg
 
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("tn%d%s", i, randName(rng, rng.Intn(6)))
+		// Duplicates on purpose: an owner user named like an owner group, a
+		// group listed twice, and a repo listed twice.
+		ownerGroups := randList(rng, "g")
+		if len(ownerGroups) > 0 && rng.Intn(3) == 0 {
+			ownerGroups = append(ownerGroups, ownerGroups[0])
+		}
+		ownerUsers := randList(rng, "u")
+		if rng.Intn(3) == 0 {
+			ownerUsers = append(ownerUsers, "g0")
+		}
+		md := map[string]any{"name": name}
+		if rng.Intn(2) == 0 {
+			md["annotations"] = map[string]any{
+				sourceReposAnnotation: `["https://r/` + name + `","https://r/shared","https://r/` + name + `"]`,
+			}
+		}
 		tenants = append(tenants, map[string]any{
-			"metadata": map[string]any{"name": name},
+			"metadata": md,
 			"spec": map[string]any{"accessControl": map[string]any{
-				"owners":  map[string]any{"groups": randList(rng, "g"), "users": randList(rng, "u")},
+				"owners":  map[string]any{"groups": ownerGroups, "users": ownerUsers},
 				"editors": map[string]any{"groups": randList(rng, "e")},
 				"viewers": map[string]any{"users": randList(rng, "v")},
 			}},
@@ -402,6 +498,25 @@ func randName(rng *rand.Rand, n int) string {
 		b[n-1] = 'x'
 	}
 	return string(b)
+}
+
+// anyList returns v as a list, or nil when it is absent.
+func anyList(v any) []any {
+	l, _ := v.([]any)
+	return l
+}
+
+// uniqStrings returns the string entries of list with duplicates dropped,
+// first occurrence kept -- what the child gotemplate's mustUniq does.
+func uniqStrings(list []any) []string {
+	var out []string
+	for _, v := range list {
+		s, _ := v.(string)
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func randList(rng *rand.Rand, prefix string) []any {

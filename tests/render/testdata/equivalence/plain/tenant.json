@@ -2,28 +2,21 @@
   "apiVersion": "tenantoperator.stakater.com/v1beta3",
   "kind": "Tenant",
   "metadata": {
-    "labels": {
-      "multi-tenant-operator/predicate": ""
-    },
     "name": "pe"
   },
   "spec": {
     "accessControl": {
       "owners": {
         "users": [
-          "ayesha.arshad@stakater.com"
+          "alice@example.com"
         ]
       }
     },
     "namespaces": {
-      "metadata": {
-        "common": {},
-        "sandbox": {}
-      },
       "onDeletePurgeNamespaces": false,
-      "withTenantPrefix": [
-        "payments",
-        "batch"
+      "withoutTenantPrefix": [
+        "pe-payments",
+        "pe-batch"
       ]
     },
     "quota": "small"

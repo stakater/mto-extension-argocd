@@ -1,5 +1,7 @@
 apiVersion: v2
 name: mto-extension-argocd
+# The template-operator-v2 versions in this description are the single source
+# of truth. README.md, values.yaml, templates/ and docs/ must match them.
 description: |
   Per-tenant ArgoCD AppProjects for Multi Tenant Operator, rendered by
   template-operator-v2 instead of a Go controller. Installs a parent Template
@@ -11,8 +13,14 @@ description: |
   multi-tenant-operator.
 
   Requires: multi-tenant-operator (Tenant v1beta3 + IntegrationConfig v1beta1),
-  template-operator-v2 >= 0.0.5 (>= 0.0.6 for sync.mode=strict), and ArgoCD
-  (argoproj.io/v1alpha1 AppProject) installed.
+  template-operator-v2 >= 0.0.5, and ArgoCD (argoproj.io/v1alpha1 AppProject)
+  installed. sync.mode=strict (the default) needs the template-operator-v2 sync
+  webhook, shipped since 0.0.3; on OpenShift without cert-manager it needs
+  >= 0.0.6. onDeletePurgeAppProject=false (the default) retains AppProjects
+  only on >= 0.0.7. On 0.0.6 and earlier the AppProject of every tenant that
+  stops being rendered is DELETED: removing a tenant's opt-in, narrowing
+  scaffolding.mode or deleting the Tenant deletes the AppProjects of those
+  tenants, and helm uninstall deletes all of them.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

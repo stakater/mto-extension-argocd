@@ -14,6 +14,14 @@ targets. Filtering here also means NamespaceSelectorMatchedZero can never
 fire, there is one namespace watch instead of one per tenant, and privileged
 filtering happens in exactly one place.
 */ -}}
+{{- /* Optional keys are read with `index`, never as fields. From v0.0.8
+       template-operator-v2 renders with missingkey=error, so a field read
+       like `$t.metadata.labels` on a Tenant without labels fails the whole
+       parent -- every tenant at once. `index` is exempt from that option and
+       returns nil for a missing key, which is what the field form returns on
+       v0.0.7 and earlier, so the output is the same on every version.
+       Only metadata and metadata.name, which every API object has, are read
+       as fields. */ -}}
 {{- $opNs := .parameters.operatorNamespace }}
 {{- $childTemplate := .parameters.childTemplateName }}
 {{- $argoNs := .parameters.argoNamespace }}
@@ -23,7 +31,7 @@ filtering happens in exactly one place.
 {{- $labelKey := .parameters.scaffoldingLabelKey }}
 {{- $defaultWl := .parameters.defaultWhitelistJson }}
 {{- $defaultBl := .parameters.defaultBlacklistJson }}
-{{- $reposPattern := .parameters.sourceReposPattern }}
+{{- $reposPatterns := mustFromJson .parameters.sourceReposPatternsJson }}
 {{- $defaultPurge := .parameters.defaultOnDeletePurge }}
 {{- $aRepos := .parameters.annotationSourceRepos }}
 {{- $aWl := .parameters.annotationClusterResourceWhitelist }}
@@ -54,12 +62,12 @@ level and errors on an explicit null with a Go type-assertion message,
 instead of reaching the actionable failure below.
 */ -}}
 {{- $ic := default dict .parameters.integrationConfig }}
-{{- $ac := default dict $ic.accessControl }}
-{{- $priv := default dict $ac.privileged }}
-{{- if or (not (hasKey $priv "namespaces")) (kindIs "invalid" $priv.namespaces) }}
+{{- $icAc := default dict (index $ic "accessControl") }}
+{{- $priv := default dict (index $icAc "privileged") }}
+{{- if or (not (hasKey $priv "namespaces")) (kindIs "invalid" (index $priv "namespaces")) }}
 {{- fail "IntegrationConfig .spec.accessControl.privileged.namespaces is absent or null; refusing to render because an empty privileged list would put privileged namespaces into every tenant's destinations. Set it explicitly, to [] if the cluster genuinely has none." }}
 {{- end }}
-{{- $privNs := $priv.namespaces | default list }}
+{{- $privNs := index $priv "namespaces" | default list }}
 {{- /* An empty-string pattern is a valid empty regex that matches EVERY
        namespace, so one stray "" would strip all destinations from every
        tenant. mustRegexMatch does not catch it. Fail the parent (fail-closed),
@@ -69,21 +77,30 @@ instead of reaching the actionable failure below.
 {{- fail "IntegrationConfig .spec.accessControl.privileged.namespaces contains an empty pattern, which matches every namespace and would strip all destinations from every tenant. Remove the empty entry (use \".*\" if you truly mean deny-all)." }}
 {{- end }}
 {{- end }}
-{{- $privGroups := $priv.groups | default list }}
+{{- $privGroups := index $priv "groups" | default list }}
+{{- /* Pass 1: which tenants get an AppProject. No child emitted means no
+       AppProject -- and, because template-operator-v2 reaps orphans,
+       narrowing this filter removes the AppProjects it excludes: deleted on
+       v0.0.6 and earlier, released on v0.0.7 and later with purge off. */ -}}
+{{- $taken := dict }}
 {{- range $t := .parameters.tenants }}
-{{- $name := $t.metadata.name }}
-{{- $labels := default dict $t.metadata.labels }}
-{{- $annos := default dict $t.metadata.annotations }}
-{{- /* Which tenants get an AppProject. No child emitted means no AppProject --
-       and, because template-operator-v2 reaps orphans, narrowing this filter
-       deletes the AppProjects it excludes. */ -}}
+{{- $labels := default dict (index $t.metadata "labels") }}
+{{- $annos := default dict (index $t.metadata "annotations") }}
 {{- $take := false }}
 {{- if eq $mode "Always" }}{{- $take = true }}
 {{- else if eq $mode "OnLabel" }}{{- $take = eq (dig $labelKey "" $labels) "true" }}
 {{- else if eq $mode "OnAnnotation" }}{{- $take = eq (dig $annoKey "" $annos) "true" }}
 {{- end }}
-{{- if $take }}
-{{- /* This tenant's namespaces, minus the privileged ones.
+{{- if $take }}{{- $_ := set $taken $t.metadata.name true }}{{- end }}
+{{- end }}
+{{- /* Pass 2: every opted-in tenant's namespaces, minus the privileged ones,
+       in ONE pass over the Namespace list. Scanning the whole list once per
+       tenant costs tenants x namespaces template steps: 1.9 s per render at
+       300 tenants and 3000 namespaces, and the parent re-renders on every
+       Namespace event in the cluster. LIST order is kept inside each
+       tenant's bucket. Skipped when no tenant is opted in, as the per-tenant
+       scan was, so the privileged regexes run on exactly the same namespaces
+       as before: those of opted-in tenants.
 
        regexMatch is UNANCHORED, matching Go's regexp.MatchString in the
        controller this replaces. A pattern of "openshift" therefore also
@@ -92,18 +109,26 @@ instead of reaching the actionable failure below.
        in this repo: MTO's managed-prefix webhook makes this path untestable
        on a real cluster, and getting it wrong puts one tenant's namespaces
        into another tenant's AppProject. */ -}}
-{{- $mine := list }}
-{{- range $ns := $.parameters.namespaces }}
-{{- $nsLabels := default dict $ns.metadata.labels }}
-{{- if eq (dig $nsLabel "" $nsLabels) $name }}
+{{- $byTenant := dict }}
+{{- if $taken }}
+{{- range $ns := .parameters.namespaces }}
+{{- $owner := dig $nsLabel "" (default dict (index $ns.metadata "labels")) }}
+{{- if and $owner (hasKey $taken $owner) }}
 {{- $isPriv := false }}
 {{- /* mustRegexMatch, not regexMatch: the plain form discards the compile
        error, so a typo'd pattern in the cluster's IntegrationConfig silently
        stops filtering -- for every tenant at once. */ -}}
 {{- range $p := $privNs }}{{- if mustRegexMatch $p $ns.metadata.name }}{{- $isPriv = true }}{{- end }}{{- end }}
-{{- if not $isPriv }}{{- $mine = append $mine $ns.metadata.name }}{{- end }}
+{{- if not $isPriv }}{{- $_ := set $byTenant $owner (append (get $byTenant $owner | default list) $ns.metadata.name) }}{{- end }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- /* Pass 3: one child per opted-in tenant, in Tenant LIST order. */ -}}
+{{- range $t := .parameters.tenants }}
+{{- $name := $t.metadata.name }}
+{{- if hasKey $taken $name }}
+{{- $annos := default dict (index $t.metadata "annotations") }}
+{{- $mine := get $byTenant $name | default list }}
 {{- /* Two steps, and both are needed. Measured against every shape a Tenant can
        take:
 
@@ -117,23 +142,23 @@ instead of reaching the actionable failure below.
        PARENT, so one malformed Tenant would take every other tenant's
        AppProject down with it. Defaulting each level in turn is the only form
        that handles every shape. */ -}}
-{{- $tspec := default dict $t.spec }}
-{{- $ac := default dict $tspec.accessControl }}
+{{- $tspec := default dict (index $t "spec") }}
+{{- $ac := default dict (index $tspec "accessControl") }}
 {{- /* Each role block is defaulted too. `dig "owners" "groups" list $ac`
        looks safe but errors when accessControl.owners is explicitly null --
        dig needs a map at every level and gets nil. Defaulting each level in
        turn is the only form that survives every shape. */ -}}
-{{- $owners := default dict $ac.owners }}
-{{- $editors := default dict $ac.editors }}
-{{- $viewers := default dict $ac.viewers }}
+{{- $owners := default dict (index $ac "owners") }}
+{{- $editors := default dict (index $ac "editors") }}
+{{- $viewers := default dict (index $ac "viewers") }}
 {{- $tg := dict
-      "owner" (default list $owners.groups)
-      "edit"  (default list $editors.groups)
-      "view"  (default list $viewers.groups) }}
+      "owner" (default list (index $owners "groups"))
+      "edit"  (default list (index $editors "groups"))
+      "view"  (default list (index $viewers "groups")) }}
 {{- $tu := dict
-      "owner" (default list $owners.users)
-      "edit"  (default list $editors.users)
-      "view"  (default list $viewers.users) }}
+      "owner" (default list (index $owners "users"))
+      "edit"  (default list (index $editors "users"))
+      "view"  (default list (index $viewers "users")) }}
 {{- /* Per-tenant overrides. An absent annotation inherits the chart default; an
        explicit "[]" overrides with empty. The annotation's value is passed down
        VERBATIM and parsed in the child, so malformed JSON fails one tenant
@@ -159,8 +184,10 @@ instead of reaching the actionable failure below.
 {{- $reposJson := "" }}
 {{- if hasKey $annos $aRepos }}
 {{- $reposJson = index $annos $aRepos }}
-{{- else if $reposPattern }}
-{{- $reposJson = toJson (list (replace "{{tenant}}" $name (replace "{{ tenant }}" $name $reposPattern))) }}
+{{- else if $reposPatterns }}
+{{- $repos := list }}
+{{- range $p := $reposPatterns }}{{- $repos = append $repos (replace "{{tenant}}" $name (replace "{{ tenant }}" $name $p)) }}{{- end }}
+{{- $reposJson = toJson $repos }}
 {{- else }}
 {{- $reposJson = "[]" }}
 {{- end }}

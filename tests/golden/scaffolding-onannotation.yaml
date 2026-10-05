@@ -19,16 +19,31 @@ spec:
         - opted-in-owner-group-d88662
       name: opted-in-owner
       policies:
-        - p, proj:opted-in:opted-in-owner, *, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, applications, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, applicationsets, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, logs, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, exec, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, repositories, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, clusters, *, opted-in/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - opted-in-edit-group-b47aff
       name: opted-in-edit
       policies:
-        - p, proj:opted-in:opted-in-edit, *, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applicationsets, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, logs, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, exec, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, repositories, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, clusters, *, opted-in/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - opted-in-view-group-42c5c0
       name: opted-in-view
       policies:
-        - p, proj:opted-in:opted-in-view, *, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, applications, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, applicationsets, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, logs, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, exec, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, repositories, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-view, clusters, get, opted-in/*, allow

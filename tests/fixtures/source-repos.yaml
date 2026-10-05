@@ -1,10 +1,11 @@
-# C3 -- sourceRepos resolution.
+# sourceRepos resolution.
 #
 # There is no safe shared default for sourceRepos: one org-wide value lets
 # every tenant deploy from every other tenant's repos. The only shareable form
 # is a pattern templated on the tenant name, which is what this pins.
 #
-#   patterned     the chart pattern with {{ tenant }} expanded per tenant.
+#   patterned     the chart's pattern list, each entry with {{ tenant }}
+#                 expanded, one sourceRepos entry per pattern, in order.
 #   overridden    the Tenant's own annotation wins outright -- no merge with
 #                 the pattern, or a tenant could never narrow its own access.
 #   emptied       an explicit "[]" yields no sourceRepos field at all, which
@@ -16,7 +17,8 @@
 # The "neither pattern nor annotation" case is covered by privileged.yaml,
 # whose golden carries no sourceRepos key. That is the shipping default, and it
 # is empty on purpose: a shipped pattern would add a field to every existing
-# AppProject that did not have one, breaking the Phase 2 byte-identical diff.
+# AppProject that did not have one, breaking the migration diff against the
+# old controller's output.
 #
 # The wrong-placeholder case ({{ .tenant }}) is not here because it cannot get
 # this far -- _helpers.tpl refuses it at helm install time. See
@@ -26,7 +28,9 @@ values:
   argocd:
     namespace: openshift-gitops
     sourceRepos:
-      pattern: https://github.com/acme/{{ tenant }}-gitops
+      pattern:
+        - https://github.com/acme/{{ tenant }}-gitops
+        - https://github.com/acme/{{ tenant }}-charts
   scaffolding:
     mode: Always
 

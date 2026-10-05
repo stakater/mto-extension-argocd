@@ -19,21 +19,37 @@ spec:
         - patterned-owner-group-33c9d2
       name: patterned-owner
       policies:
-        - p, proj:patterned:patterned-owner, *, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, applications, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, applicationsets, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, logs, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, exec, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, repositories, *, patterned/*, allow
+        - p, proj:patterned:patterned-owner, clusters, *, patterned/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - patterned-edit-group-36a6a0
       name: patterned-edit
       policies:
-        - p, proj:patterned:patterned-edit, *, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, applications, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, applicationsets, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, logs, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, exec, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, repositories, *, patterned/*, allow
+        - p, proj:patterned:patterned-edit, clusters, *, patterned/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - patterned-view-group-816b39
       name: patterned-view
       policies:
-        - p, proj:patterned:patterned-view, *, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, applications, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, applicationsets, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, logs, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, exec, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, repositories, get, patterned/*, allow
+        - p, proj:patterned:patterned-view, clusters, get, patterned/*, allow
   sourceRepos:
     - https://github.com/acme/patterned-gitops
+    - https://github.com/acme/patterned-charts
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -55,19 +71,34 @@ spec:
         - overridden-owner-group-9e405f
       name: overridden-owner
       policies:
-        - p, proj:overridden:overridden-owner, *, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, applications, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, applicationsets, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, logs, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, exec, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, repositories, *, overridden/*, allow
+        - p, proj:overridden:overridden-owner, clusters, *, overridden/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - overridden-edit-group-b128d3
       name: overridden-edit
       policies:
-        - p, proj:overridden:overridden-edit, *, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, applications, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, applicationsets, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, logs, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, exec, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, repositories, *, overridden/*, allow
+        - p, proj:overridden:overridden-edit, clusters, *, overridden/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - overridden-view-group-c71f91
       name: overridden-view
       policies:
-        - p, proj:overridden:overridden-view, *, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, applications, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, applicationsets, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, logs, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, exec, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, repositories, get, overridden/*, allow
+        - p, proj:overridden:overridden-view, clusters, get, overridden/*, allow
   sourceRepos:
     - https://gitlab.example.com/team/apps.git
     - https://github.com/acme/shared-lib
@@ -92,16 +123,31 @@ spec:
         - emptied-owner-group-7a333c
       name: emptied-owner
       policies:
-        - p, proj:emptied:emptied-owner, *, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, applications, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, applicationsets, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, logs, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, exec, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, repositories, *, emptied/*, allow
+        - p, proj:emptied:emptied-owner, clusters, *, emptied/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - emptied-edit-group-af9458
       name: emptied-edit
       policies:
-        - p, proj:emptied:emptied-edit, *, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, applications, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, applicationsets, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, logs, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, exec, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, repositories, *, emptied/*, allow
+        - p, proj:emptied:emptied-edit, clusters, *, emptied/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - emptied-view-group-4a40bd
       name: emptied-view
       policies:
-        - p, proj:emptied:emptied-view, *, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, applications, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, applicationsets, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, logs, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, exec, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, repositories, get, emptied/*, allow
+        - p, proj:emptied:emptied-view, clusters, get, emptied/*, allow

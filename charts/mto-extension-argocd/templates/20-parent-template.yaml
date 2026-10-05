@@ -54,8 +54,8 @@ spec:
     - name: defaultBlacklistJson
       value: {{ .Values.argocd.namespaceResourceBlacklist | default list | toJson | quote }}
     {{- include "mto-extension-argocd.validateSourceReposPattern" . }}
-    - name: sourceReposPattern
-      value: {{ (.Values.argocd.sourceRepos).pattern | default "" | quote }}
+    - name: sourceReposPatternsJson
+      value: {{ (.Values.argocd.sourceRepos).pattern | default list | toJson | quote }}
     {{- include "mto-extension-argocd.validateOnDeletePurge" . }}
     - name: defaultOnDeletePurge
       value: {{ .Values.onDeletePurgeAppProject | toString | quote }}

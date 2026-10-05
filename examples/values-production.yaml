@@ -18,13 +18,16 @@ argocd:
     #
     # There is no safe shared value: one org-wide repo would let every tenant
     # deploy from every other tenant's code. The only shareable form is a
-    # pattern templated on the tenant name, which is what this is. A tenant
-    # needing something different overrides it with the source-repos
-    # annotation.
+    # pattern templated on the tenant name, which is what each entry here is.
+    # A tenant needing something different overrides the whole list with the
+    # source-repos annotation.
     #
     # Only {{ tenant }} and {{tenant}} are substituted. Any other placeholder
     # is refused at install time rather than shipped into a live AppProject.
-    pattern: https://github.com/acme/{{ tenant }}-gitops
+    # Each entry becomes one sourceRepos entry.
+    pattern:
+      - https://github.com/acme/{{ tenant }}-gitops
+      - https://github.com/acme/{{ tenant }}-charts
 
   # Cluster-scoped kinds tenants may manage, and namespaced kinds they may not.
   #
@@ -42,8 +45,9 @@ argocd:
 scaffolding:
   # Nothing is scaffolded until a Tenant is annotated. Prefer this to Always:
   # it is the only thing preventing an accidental collision with a still-running
-  # ExtensionsArgoCDReconciler, and narrowing the mode later DELETES the
-  # AppProjects it excludes.
+  # ExtensionsArgoCDReconciler, and narrowing the mode later removes the
+  # AppProjects it excludes: released and kept on template-operator-v2 v0.0.7
+  # and later with purge off, DELETED on v0.0.6 and earlier.
   mode: OnAnnotation
 
 # Where MTO's IntegrationConfig lives. Supplies accessControl.privileged only --

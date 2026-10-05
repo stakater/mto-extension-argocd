@@ -14,10 +14,10 @@ RoleBinding is admitted against a Role that does not exist yet.
        "don't create" instead of a nil-pointer stack trace. */ -}}
 {{- if (.Values.rbac).create }}
 {{- $sa := .Values.rbac.serviceAccount }}
-{{- /* Cluster-scoped names are release-scoped. Fixed names mean a second
-       install anywhere on the cluster fails with "invalid ownership metadata",
-       and an uninstall of either release revokes the other's grants. */ -}}
-{{- $prefix := printf "%s-%s" .Release.Name .Release.Namespace }}
+{{- /* Every name here is fixed, like the Template names: the chart supports
+       one release per cluster (see operatorNamespace in values.yaml), and a
+       release prefix on some names would suggest an isolation it does not
+       give. */ -}}
 ---
 {{- /* Cluster-wide reads. The parent's two LIST parameters need these, and
        discoverOwnedResources LISTs AppProjects cluster-wide -- which is why
@@ -26,7 +26,7 @@ RoleBinding is admitted against a Role that does not exist yet.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $prefix }}-argocd-observe
+  name: mto-extension-argocd-observe
   annotations:
     {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
@@ -45,7 +45,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $prefix }}-argocd-observe
+  name: mto-extension-argocd-observe
   annotations:
     {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
@@ -53,7 +53,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $prefix }}-argocd-observe
+  name: mto-extension-argocd-observe
 subjects:
   - kind: ServiceAccount
     name: {{ $sa.name }}
@@ -69,7 +69,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $prefix }}-argocd-write
+  name: mto-extension-argocd-write
   annotations:
     {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
   labels:
@@ -87,7 +87,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $prefix }}-argocd-write
+  name: mto-extension-argocd-write
   namespace: {{ .Values.argocd.namespace }}
   annotations:
     {{- include "mto-extension-argocd.retainAnnotations" . | nindent 4 }}
@@ -96,7 +96,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $prefix }}-argocd-write
+  name: mto-extension-argocd-write
 subjects:
   - kind: ServiceAccount
     name: {{ $sa.name }}

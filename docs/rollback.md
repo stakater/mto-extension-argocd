@@ -18,7 +18,7 @@ kubectl get appprojects.argoproj.io -n <argocd-namespace> -o yaml \
 Detach the `AppProject` from the chart *before* removing the opt-in, so the reap
 has nothing to reap. The object is never deleted and its UID never changes.
 
-On template-operator-v2 `8a44194` and later, `onDeletePurgeAppProject: false` —
+On template-operator-v2 v0.0.7 and later, `onDeletePurgeAppProject: false` —
 the chart default — already makes an opt-out release the AppProject rather than
 delete it, and none of this is needed. On v0.0.6 and earlier it is deleted
 regardless; the detach below is the workaround.
@@ -49,23 +49,16 @@ same UID, pinned by `tests/e2e`.
 
 ## The whole release
 
-**Never `helm uninstall` on its own.** It deletes the RBAC and the
-`TemplateInstance`s together, and each `TemplateInstance`'s finalizer needs that
-RBAC to delete its `AppProject`. Teardown deadlocks and every object needs its
-finalizer cleared by hand.
+A plain `helm uninstall` is safe. The chart's RBAC is kept, so the finalizers
+that reap the children still have the permissions they need. On
+template-operator-v2 v0.0.7+ with purge off (the default) the AppProjects are
+RELEASED and survive; on v0.0.6 and earlier they are DELETED regardless.
 
 ```bash
-# 1. drop the parent. Children and their AppProjects drain while the RBAC still
-#    exists. On template-operator-v2 8a44194+ the AppProjects are RELEASED and
-#    survive; on v0.0.6 and earlier they are DELETED regardless.
-kubectl delete templateinstances.templates.v2.stakater.com \
-  mto-argocd-parent -n multi-tenant-operator
-
-# 2. wait until no mto-argocd-tenant-* children remain, then
 helm uninstall mto-extension-argocd -n multi-tenant-operator
 
-# 3. clear the opt-in markers. kubectl reports "not found" for tenants that
-#    never had one; that is noise, not a failure.
+# clear the opt-in markers. kubectl reports "not found" for tenants that
+# never had one; that is noise, not a failure.
 kubectl annotate tenant --all argocd.tenantoperator.stakater.com/enabled-
 ```
 

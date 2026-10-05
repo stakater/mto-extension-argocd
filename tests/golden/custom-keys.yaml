@@ -24,18 +24,33 @@ spec:
         - custom-owners
       name: custom-owner
       policies:
-        - p, proj:custom:custom-owner, *, *, custom/*, allow
+        - p, proj:custom:custom-owner, applications, *, custom/*, allow
+        - p, proj:custom:custom-owner, applicationsets, *, custom/*, allow
+        - p, proj:custom:custom-owner, logs, *, custom/*, allow
+        - p, proj:custom:custom-owner, exec, *, custom/*, allow
+        - p, proj:custom:custom-owner, repositories, *, custom/*, allow
+        - p, proj:custom:custom-owner, clusters, *, custom/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - custom-edit-group-0f43ea
       name: custom-edit
       policies:
-        - p, proj:custom:custom-edit, *, *, custom/*, allow
+        - p, proj:custom:custom-edit, applications, *, custom/*, allow
+        - p, proj:custom:custom-edit, applicationsets, *, custom/*, allow
+        - p, proj:custom:custom-edit, logs, *, custom/*, allow
+        - p, proj:custom:custom-edit, exec, *, custom/*, allow
+        - p, proj:custom:custom-edit, repositories, *, custom/*, allow
+        - p, proj:custom:custom-edit, clusters, *, custom/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - custom-view-group-8efadb
       name: custom-view
       policies:
-        - p, proj:custom:custom-view, *, get, custom/*, allow
+        - p, proj:custom:custom-view, applications, get, custom/*, allow
+        - p, proj:custom:custom-view, applicationsets, get, custom/*, allow
+        - p, proj:custom:custom-view, logs, get, custom/*, allow
+        - p, proj:custom:custom-view, exec, get, custom/*, allow
+        - p, proj:custom:custom-view, repositories, get, custom/*, allow
+        - p, proj:custom:custom-view, clusters, get, custom/*, allow
   sourceRepos:
     - https://git.acme.example/custom.git

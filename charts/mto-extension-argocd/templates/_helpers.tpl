@@ -9,7 +9,7 @@ mto-argocd-parent
 {{- /*
 The RBAC must OUTLIVE the TemplateInstances on teardown: tov2's finalizers need
 this chart's grants to release/delete the AppProjects and reap the children, so
-if the RBAC goes first everything deadlocks in Terminating (TOV2-5). Retained
+if the RBAC goes first everything deadlocks in Terminating. Retained
 under both tear-down tools, which honour different annotations: resource-policy
 for `helm uninstall`, sync-options (Prune=false,Delete=false) for an ArgoCD app
 prune/delete. Harmless once the projects drain; NOTES.txt has the cleanup line.
@@ -28,16 +28,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 
 {{- /*
-Drift protection, emitted onto both Templates. `off` emits nothing at all
-rather than `mode: off`, so the CRD default applies.
-
-The values.schema.json enum already rejects a bad mode, but the schema is
-skippable (helm >= 3.16 --skip-schema-validation) and is not applied on every
-path that renders a chart through the Helm SDK -- so the check is repeated
-here. Note that unquoted `off` parses as a YAML boolean, hence the toString.
-*/ -}}
-{{- /*
-sourceRepos.pattern is expanded per tenant by substituting the literal
+Each sourceRepos.pattern entry is expanded per tenant by substituting the literal
 `{{ tenant }}` (or `{{tenant}}`). Any other placeholder form -- `{{ .tenant }}`,
 `{{ .Tenant }}`, `${tenant}`, `$(tenant)`, `%s` -- is not substituted, and the
 placeholder would ship verbatim into a live AppProject's sourceRepos. That
@@ -47,16 +38,40 @@ placeholder syntax is rejected. (`%s` is safe to reject outright -- `s` is not
 a hex digit, so it can never be legitimate percent-encoding in a repo URL.)
 
 Caught here, at helm install time, rather than in the parent gotemplate: the
-pattern is one chart-wide value, so a bad one is a global misconfiguration, and
+patterns are chart-wide values, so a bad one is a global misconfiguration, and
 refusing the install is both the earliest and the safest place to say so.
+
+The list shape is checked here too, because the schema is skippable: a plain
+string (the chart's earlier shape) or an empty entry would otherwise reach
+every tenant's AppProject.
+
+So are duplicates, with `{{tenant}}` and `{{ tenant }}` read as the same
+placeholder. ArgoCD's API refuses a project that lists a repo twice. The child
+gotemplate drops duplicates as well, so this check only makes the mistake
+visible at install time.
 */ -}}
 {{- define "mto-extension-argocd.validateSourceReposPattern" -}}
-{{- $p := (.Values.argocd.sourceRepos).pattern | default "" -}}
-{{- if $p -}}
+{{- $ps := (.Values.argocd.sourceRepos).pattern | default list -}}
+{{- if not (kindIs "slice" $ps) -}}
+{{- fail (printf "argocd.sourceRepos.pattern must be a list of strings, got %s %q; write it as a list, for example pattern: [%q]" (kindOf $ps) (toString $ps) (toString $ps)) -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range $p := $ps -}}
+{{- if not (kindIs "string" $p) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entries must be strings, got %s (%v)" (kindOf $p) $p) -}}
+{{- end -}}
+{{- if eq $p "" -}}
+{{- fail "argocd.sourceRepos.pattern contains an empty entry, which would ship an empty repository into every tenant's AppProject" -}}
+{{- end -}}
+{{- $norm := replace "{{tenant}}" "{{ tenant }}" $p -}}
+{{- if hasKey $seen $norm -}}
+{{- fail (printf "argocd.sourceRepos.pattern lists %q twice ({{tenant}} and {{ tenant }} count as the same); ArgoCD refuses a project with a duplicate repository" $norm) -}}
+{{- end -}}
+{{- $_ := set $seen $norm true -}}
 {{- $expanded := replace "{{tenant}}" "x" (replace "{{ tenant }}" "x" $p) -}}
 {{- range $residue := list "{{" "${" "$(" "%s" -}}
 {{- if contains $residue $expanded -}}
-{{- fail (printf "argocd.sourceRepos.pattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -115,11 +130,11 @@ and every tenant renders with no destinations except the ArgoCD namespace.
 {{- end -}}
 {{- $s := .Values.scaffolding | default dict -}}
 {{- if not (default dict $s.annotations).enabled -}}
-{{- fail "scaffolding.annotations.enabled must be a non-empty annotation key; in OnAnnotation mode an empty key matches no Tenant, so zero children are emitted and orphan reaping deletes every AppProject this release manages" -}}
+{{- fail "scaffolding.annotations.enabled must be a non-empty annotation key; in OnAnnotation mode an empty key matches no Tenant, so zero children are emitted and orphan reaping then deletes or releases every AppProject this release manages" -}}
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "scaffolding.annotations.enabled" "value" (default dict $s.annotations).enabled) -}}
 {{- if not (default dict $s.labels).enabled -}}
-{{- fail "scaffolding.labels.enabled must be a non-empty label key; in OnLabel mode an empty key matches no Tenant, so zero children are emitted and orphan reaping deletes every AppProject this release manages" -}}
+{{- fail "scaffolding.labels.enabled must be a non-empty label key; in OnLabel mode an empty key matches no Tenant, so zero children are emitted and orphan reaping then deletes or releases every AppProject this release manages" -}}
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "scaffolding.labels.enabled" "value" (default dict $s.labels).enabled) -}}
 {{- if not .Values.tenantNamespaceLabel -}}
@@ -186,15 +201,26 @@ is not applied on every path that renders a chart through the Helm SDK.
 The blast radius here is larger than sync.mode's. An unrecognised mode matches
 no branch in the parent gotemplate, every tenant fails the scaffolding filter,
 zero children are emitted -- and template-operator-v2 reaps orphans, so a typo
-DELETES every AppProject the chart manages.
+takes every AppProject the chart manages out of management: DELETED on
+template-operator-v2 v0.0.6 and earlier, released on v0.0.7 and later with
+purge off.
 */ -}}
 {{- define "mto-extension-argocd.validateScaffoldingMode" -}}
 {{- $mode := (.Values.scaffolding).mode | toString -}}
 {{- if not (has $mode (list "Always" "OnLabel" "OnAnnotation" "Never")) -}}
-{{- fail (printf "scaffolding.mode must be one of Always, OnLabel, OnAnnotation, Never -- got %q. An unrecognised value emits no children, and orphan reaping then deletes every AppProject this release manages." $mode) -}}
+{{- fail (printf "scaffolding.mode must be one of Always, OnLabel, OnAnnotation, Never -- got %q. An unrecognised value emits no children, and orphan reaping then deletes or releases every AppProject this release manages." $mode) -}}
 {{- end -}}
 {{- end -}}
 
+{{- /*
+Drift protection, emitted onto both Templates. `off` emits nothing at all
+rather than `mode: off`, so the CRD default applies.
+
+The values.schema.json enum already rejects a bad mode, but the schema is
+skippable (helm >= 3.16 --skip-schema-validation) and is not applied on every
+path that renders a chart through the Helm SDK -- so the check is repeated
+here. Note that unquoted `off` parses as a YAML boolean, hence the toString.
+*/ -}}
 {{- define "mto-extension-argocd.sync" -}}
 {{- $sync := .Values.sync | default dict -}}
 {{- /* No fallback mode on purpose. A missing sync.mode is only reachable when
@@ -213,8 +239,7 @@ Under strict, the admission webhook refuses any UPDATE that touches an
 enforced field. template-operator-v2 manages its own finalizer on every
 rendered resource through exactly such an update, so without a
 metadata.finalizers exemption it locks itself out and nothing can be torn
-down. Verified working with the exemption on tov2 v0.0.5; the webhook has
-shipped since v0.0.3.
+down. Version support for strict is stated once, in Chart.yaml.
 */ -}}
 {{- if eq $mode "strict" -}}
 {{- $ignored := $sync.ignoreFields | default list -}}
