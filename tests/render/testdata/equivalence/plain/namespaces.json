@@ -1,0 +1,866 @@
+{
+  "apiVersion": "v1",
+  "kind": "NamespaceList",
+  "items": [
+    {
+      "metadata": {
+        "name": "cert-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "cert-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "chart-repo",
+        "labels": {
+          "kubernetes.io/metadata.name": "chart-repo"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "cnpg-system",
+        "labels": {
+          "kubernetes.io/metadata.name": "cnpg-system",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "idp-db-demo",
+        "labels": {
+          "kubernetes.io/metadata.name": "idp-db-demo",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "idp-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "idp-operator",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "default",
+        "labels": {
+          "kubernetes.io/metadata.name": "default"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "demo-consumer",
+        "labels": {
+          "kubernetes.io/metadata.name": "demo-consumer",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "demo-provider",
+        "labels": {
+          "kubernetes.io/metadata.name": "demo-provider",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "dex",
+        "labels": {
+          "kubernetes.io/metadata.name": "dex"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "external-secrets",
+        "labels": {
+          "kubernetes.io/metadata.name": "external-secrets"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "keycloak",
+        "labels": {
+          "kubernetes.io/metadata.name": "keycloak"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "kube-node-lease",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-node-lease"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "kube-public",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-public"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "kube-system",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-system"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "ls-demo-acme-prod",
+        "labels": {
+          "kubernetes.io/metadata.name": "ls-demo-acme-prod",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "ls-demo-plain",
+        "labels": {
+          "kubernetes.io/metadata.name": "ls-demo-plain",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "ls-demo-platform",
+        "labels": {
+          "kubernetes.io/metadata.name": "ls-demo-platform",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "mto-extension-grafana-system",
+        "labels": {
+          "kubernetes.io/metadata.name": "mto-extension-grafana-system"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "mto-extension-openbao-system",
+        "labels": {
+          "kubernetes.io/metadata.name": "mto-extension-openbao-system"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "open-cluster-management-addon-observability",
+        "labels": {
+          "kubernetes.io/metadata.name": "open-cluster-management-addon-observability"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "open-cluster-management-agent-addon",
+        "labels": {
+          "kubernetes.io/metadata.name": "open-cluster-management-agent-addon"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "open-cluster-management-policies",
+        "labels": {
+          "kubernetes.io/metadata.name": "open-cluster-management-policies"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "open-cluster-management-cluster-id",
+        "labels": {
+          "kubernetes.io/metadata.name": "open-cluster-management-cluster-id"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openbao",
+        "labels": {
+          "kubernetes.io/metadata.name": "openbao"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-apiserver",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-apiserver"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-apiserver-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-apiserver-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-authentication",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-authentication"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-authentication-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-authentication-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cloud-controller-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cloud-controller-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cloud-credential-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cloud-credential-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cloud-network-config-controller",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cloud-network-config-controller"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-csi-drivers",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-csi-drivers"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-machine-approver",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-machine-approver"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-node-tuning-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-node-tuning-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-samples-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-samples-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-storage-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-storage-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-cluster-version",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-cluster-version"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-config",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-config"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-config-managed",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-config-managed"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-config-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-config-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-console",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-console"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-console-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-console-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-console-user-settings",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-console-user-settings"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-controller-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-controller-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-controller-manager-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-controller-manager-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-dns",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-dns"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-dns-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-dns-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-etcd",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-etcd"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-host-network",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-host-network"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-image-registry",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-image-registry"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-infra",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-infra"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-ingress",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-ingress"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-ingress-canary",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-ingress-canary"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-ingress-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-ingress-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-insights",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-insights"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-apiserver",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-apiserver"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-apiserver-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-apiserver-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-controller-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-controller-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-controller-manager-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-controller-manager-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-scheduler",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-scheduler"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-scheduler-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-scheduler-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-storage-version-migrator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-storage-version-migrator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-kube-storage-version-migrator-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-kube-storage-version-migrator-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-machine-api",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-machine-api"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-machine-config-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-machine-config-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-marketplace",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-marketplace"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-monitoring",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-monitoring"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-multus",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-multus"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-network-console",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-network-console"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-network-diagnostics",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-network-diagnostics"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-network-node-identity",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-network-node-identity"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-network-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-network-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-node",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-node"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-operator-lifecycle-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-operator-lifecycle-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-operators",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-operators"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-ovn-kubernetes",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-ovn-kubernetes"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-rbac-permissions",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-rbac-permissions"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-route-controller-manager",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-route-controller-manager"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-service-ca",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-service-ca"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-service-ca-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-service-ca-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "openshift-user-workload-monitoring",
+        "labels": {
+          "kubernetes.io/metadata.name": "openshift-user-workload-monitoring"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "pe-batch",
+        "labels": {
+          "kubernetes.io/metadata.name": "pe-batch",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "pe-load-test",
+        "labels": {
+          "kubernetes.io/metadata.name": "pe-load-test"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "pe-payments",
+        "labels": {
+          "kubernetes.io/metadata.name": "pe-payments",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "rhbk-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "rhbk-operator",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "rhbk-test",
+        "labels": {
+          "kubernetes.io/metadata.name": "rhbk-test",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "sos-api",
+        "labels": {
+          "kubernetes.io/metadata.name": "sos-api"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "sos-load-test",
+        "labels": {
+          "kubernetes.io/metadata.name": "sos-load-test"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "spike-metrics-test",
+        "labels": {
+          "kubernetes.io/metadata.name": "spike-metrics-test",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "splunk-lab",
+        "labels": {
+          "kubernetes.io/metadata.name": "splunk-lab",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "splunk-otel-collector",
+        "labels": {
+          "kubernetes.io/metadata.name": "splunk-otel-collector",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "stakater-template-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "stakater-template-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "stakater-tenant-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "stakater-tenant-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "team-a-api",
+        "labels": {
+          "kubernetes.io/metadata.name": "team-a-api",
+          "stakater.com/tenant": "team-a"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "team-a-worker",
+        "labels": {
+          "kubernetes.io/metadata.name": "team-a-worker",
+          "stakater.com/tenant": "team-a"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "telemetry",
+        "labels": {
+          "kubernetes.io/metadata.name": "telemetry"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "trace-demo-obs",
+        "labels": {
+          "kubernetes.io/metadata.name": "trace-demo-obs"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "vault",
+        "labels": {
+          "kubernetes.io/metadata.name": "vault"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "vault-config",
+        "labels": {
+          "kubernetes.io/metadata.name": "vault-config"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "vault-config-operator",
+        "labels": {
+          "kubernetes.io/metadata.name": "vault-config-operator"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "cluster-id",
+        "labels": {
+          "kubernetes.io/metadata.name": "cluster-id"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "xt-a",
+        "labels": {
+          "kubernetes.io/metadata.name": "xt-a",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "xt-b",
+        "labels": {
+          "kubernetes.io/metadata.name": "xt-b",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "xt-c",
+        "labels": {
+          "kubernetes.io/metadata.name": "xt-c",
+          "stakater.com/tenant": "pe"
+        }
+      }
+    }
+  ]
+}

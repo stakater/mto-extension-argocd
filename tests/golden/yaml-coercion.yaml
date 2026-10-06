@@ -1,0 +1,52 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: "12345"
+  namespace: argo-cd
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: "on"
+      server: https://kubernetes.default.svc
+    - namespace: 12345-dev
+      server: https://kubernetes.default.svc
+    - namespace: argo-cd
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - 12345-owner-group-e0ff01
+        - "067e61"
+      name: 12345-owner
+      policies:
+        - p, proj:12345:12345-owner, applications, *, 12345/*, allow
+        - p, proj:12345:12345-owner, applicationsets, *, 12345/*, allow
+        - p, proj:12345:12345-owner, logs, *, 12345/*, allow
+        - p, proj:12345:12345-owner, exec, *, 12345/*, allow
+        - p, proj:12345:12345-owner, repositories, *, 12345/*, allow
+        - p, proj:12345:12345-owner, clusters, *, 12345/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - 12345-edit-group-010abb
+      name: 12345-edit
+      policies:
+        - p, proj:12345:12345-edit, applications, *, 12345/*, allow
+        - p, proj:12345:12345-edit, applicationsets, *, 12345/*, allow
+        - p, proj:12345:12345-edit, logs, *, 12345/*, allow
+        - p, proj:12345:12345-edit, exec, *, 12345/*, allow
+        - p, proj:12345:12345-edit, repositories, *, 12345/*, allow
+        - p, proj:12345:12345-edit, clusters, *, 12345/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - 12345-view-group-519deb
+      name: 12345-view
+      policies:
+        - p, proj:12345:12345-view, applications, get, 12345/*, allow
+        - p, proj:12345:12345-view, applicationsets, get, 12345/*, allow
+        - p, proj:12345:12345-view, logs, get, 12345/*, allow
+        - p, proj:12345:12345-view, exec, get, 12345/*, allow
+        - p, proj:12345:12345-view, repositories, get, 12345/*, allow
+        - p, proj:12345:12345-view, clusters, get, 12345/*, allow

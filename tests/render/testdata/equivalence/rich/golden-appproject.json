@@ -1,0 +1,150 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "AppProject",
+  "metadata": {
+    "labels": {
+      "multi-tenant-operator/predicate": ""
+    },
+    "name": "pe",
+    "namespace": "stakater-tenant-operator"
+  },
+  "spec": {
+    "clusterResourceWhitelist": [
+      {
+        "group": "tronador.stakater.com",
+        "kind": "EnvironmentProvisioner"
+      },
+      {
+        "group": "",
+        "kind": "PersistentVolume"
+      }
+    ],
+    "description": "Managed by Extensions controller",
+    "destinations": [
+      {
+        "namespace": "idp-db-demo",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "pe-batch",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "ls-demo-acme-prod",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "ls-demo-platform",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "rhbk-test",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "splunk-otel-collector",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "xt-b",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "rhbk-operator",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "idp-operator",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "spike-metrics-test",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "xt-a",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "demo-consumer",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "splunk-lab",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "demo-provider",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "cnpg-system",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "pe-payments",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "ls-demo-plain",
+        "server": "https://kubernetes.default.svc"
+      },
+      {
+        "namespace": "stakater-tenant-operator",
+        "server": "https://kubernetes.default.svc"
+      }
+    ],
+    "namespaceResourceBlacklist": [
+      {
+        "group": "",
+        "kind": "ResourceQuota"
+      }
+    ],
+    "roles": [
+      {
+        "description": "Role that gives full access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-owner-group-489fab",
+          "review-platform-admins-b",
+          "review-platform-admins-a",
+          "review-owners-b",
+          "review-owners-a"
+        ],
+        "name": "pe-owner",
+        "policies": [
+          "p, proj:pe:pe-owner, *, *, pe/*, allow"
+        ]
+      },
+      {
+        "description": "Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-edit-group-c49e02",
+          "review-platform-admins-b",
+          "review-platform-admins-a",
+          "review-editors"
+        ],
+        "name": "pe-edit",
+        "policies": [
+          "p, proj:pe:pe-edit, *, *, pe/*, allow"
+        ]
+      },
+      {
+        "description": "Role that gives view access to all resources inside the tenant's namespace to the tenant owner group",
+        "groups": [
+          "pe-view-group-84b727",
+          "review-platform-admins-b",
+          "review-platform-admins-a",
+          "review-viewers"
+        ],
+        "name": "pe-view",
+        "policies": [
+          "p, proj:pe:pe-view, *, get, pe/*, allow"
+        ]
+      }
+    ],
+    "sourceRepos": [
+      "https://github.com/example/pe-gitops",
+      "https://github.com/example/pe-charts"
+    ]
+  }
+}

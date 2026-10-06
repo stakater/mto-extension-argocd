@@ -1,0 +1,69 @@
+{{- /* Access here is nil-safe on purpose: under --skip-schema-validation with
+       argocd/scaffolding null, a plain .Values.argocd.namespace nil-pointers
+       HERE first, drowning the actionable _helpers.tpl guard messages in a
+       template stack trace. */ -}}
+{{- $mode := (.Values.scaffolding).mode | toString -}}
+mto-extension-argocd {{ .Chart.Version }} installed into {{ .Values.operatorNamespace }}.
+
+AppProjects are rendered into: {{ (.Values.argocd).namespace }}
+Scaffolding mode:              {{ $mode }}
+{{ if eq $mode "OnAnnotation" -}}
+Opt a tenant in with:
+
+  kubectl annotate tenant <name> {{ ((.Values.scaffolding).annotations).enabled }}=true
+
+The value must be exactly "true".
+
+MIGRATING FROM THE EXTENSIONS CONTROLLER? Do not annotate anything yet. Delete
+that tenant's Extensions CR first, WHILE the old controller is still running --
+its finalizer is released by nothing else, and annotating first puts two writers
+on the same AppProject. Dedicated migration tooling (inventory, snapshot,
+per-tenant cutover) ships in a follow-up release.
+{{- else if eq $mode "OnLabel" -}}
+Opt a tenant in with:
+
+  kubectl label tenant <name> {{ ((.Values.scaffolding).labels).enabled }}=true
+
+The value must be exactly "true".
+{{- else if eq $mode "Always" -}}
+Every Tenant on this cluster now gets an AppProject.
+{{- else -}}
+scaffolding.mode is Never: no AppProjects will be rendered, and any that this
+release already owns have been reaped.
+{{- end }}
+
+UNINSTALLING
+============
+
+A plain uninstall is now safe -- run it directly:
+
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+The chart's RBAC is annotated `helm.sh/resource-policy: keep` (and, for GitOps,
+`argocd.argoproj.io/sync-options: Prune=false,Delete=false`), so it OUTLIVES the
+uninstall. That is what makes the single command work: dropping the parent
+TemplateInstance lets template-operator-v2 reap the children and release their
+AppProjects while the RBAC those finalizers depend on is still present. Without
+the retained RBAC the finalizers deadlock in Terminating, which is why this used
+to need an ordered manual dance.
+
+What happens to the AppProjects this release manages depends on the operator
+build and on onDeletePurgeAppProject. With the default (retain) on
+template-operator-v2 v0.0.7 and later they are RELEASED and survive;
+on v0.0.6 and earlier they are DELETED, because retain is not enforceable there.
+
+The retained RBAC is deliberately left behind -- it is harmless once the
+projects have drained, and it is re-adopted automatically on a same-name
+reinstall. Remove it explicitly only when you want it gone:
+
+  kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl delete role,rolebinding mto-extension-argocd-children \
+    -n {{ .Values.operatorNamespace }}
+  kubectl delete role,rolebinding mto-extension-argocd-integrationconfig-read \
+    -n {{ .Values.integrationConfig.namespace }}
+  kubectl delete rolebinding mto-extension-argocd-write \
+    -n {{ (.Values.argocd).namespace }}
+
+If you are reinstalling, wait for `Template/mto-argocd-parent` to disappear
+first. `helm uninstall` returns before template-operator-v2 releases its
+finalizer, and an install in that window fails with an ownership-metadata error.

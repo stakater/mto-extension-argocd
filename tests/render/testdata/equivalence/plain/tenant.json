@@ -1,0 +1,24 @@
+{
+  "apiVersion": "tenantoperator.stakater.com/v1beta3",
+  "kind": "Tenant",
+  "metadata": {
+    "name": "pe"
+  },
+  "spec": {
+    "accessControl": {
+      "owners": {
+        "users": [
+          "alice@example.com"
+        ]
+      }
+    },
+    "namespaces": {
+      "onDeletePurgeNamespaces": false,
+      "withoutTenantPrefix": [
+        "pe-payments",
+        "pe-batch"
+      ]
+    },
+    "quota": "small"
+  }
+}

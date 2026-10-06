@@ -1,0 +1,593 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: templates.templates.v2.stakater.com
+spec:
+  group: templates.v2.stakater.com
+  names:
+    kind: Template
+    listKind: TemplateList
+    plural: templates
+    singular: template
+  scope: Namespaced
+  versions:
+  - name: v2alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Template is a reusable blueprint that defines Kubernetes resources which can be
+          instantiated multiple times across different namespaces using TemplateInstances.
+          Templates are scoped to a provider namespace and contain go templates or Helm charts
+          that render into one or more Kubernetes manifests when instantiated.
+
+          Namespace Scope (Provider):
+          The Template may only reference other resources in its own namespace.
+
+          Security Implication:
+          Anyone who can create a Template in a namespace can expose any resource that the
+          template-operator service account is allowed to read within that namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TemplateSpec defines the desired state of Template
+            properties:
+              gotemplate:
+                description: |-
+                  Exactly one of `gotemplate` or `helm` must be specified.
+                  gotemplate is rendered using Go text/template.
+                  It may emit one or more Kubernetes manifests.
+                  Sprig functions are also available https://masterminds.github.io/sprig/
+
+                  If a namespace-scoped resource omits the namespace field,
+                  it will be created in the TemplateInstance's namespace (consumer namespace),
+                  NOT in the 'default' namespace or the Template's namespace.
+
+                  Available context (non-exhaustive):
+                  - .parameters : resolved parameter values
+                  - .instance   : metadata of the TemplateInstance (name, namespace, labels)
+                type: string
+              helm:
+                description: |-
+                  Helm renders a Helm chart instead of a raw Go template.
+                  Exactly one of `gotemplate` or `helm` must be specified.
+                properties:
+                  chart:
+                    description: Chart defines where the Helm chart is sourced from.
+                    properties:
+                      repository:
+                        description: |-
+                          Repository defines the repository location, chart name, version,
+                          and optional authentication.
+                        properties:
+                          auth:
+                            description: |-
+                              Auth provides optional authentication credentials.
+                              The referenced Secret MUST live in the same namespace as this Template.
+
+                              Supported credential layouts by source type:
+
+                              1. HTTP(S) Helm repositories
+                                 - username / password keys
+                                 - token key
+
+                              2. OCI registries (oci://)
+                                 - username / password
+                                 - token
+                                 - or standard Docker config (.dockerconfigjson)
+                            properties:
+                              secretRef:
+                                description: SecretRef references a Secret in the
+                                  same namespace as the Template.
+                                properties:
+                                  name:
+                                    description: Name of the Secret.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                            required:
+                            - secretRef
+                            type: object
+                          name:
+                            description: Name is the chart name within the repository.
+                            minLength: 1
+                            type: string
+                          url:
+                            description: |-
+                              URL is the repository URL.
+                              For HTTP/HTTPS repositories: https://charts.example.com
+                              For OCI registries: oci://ghcr.io/org/charts
+                            minLength: 1
+                            pattern: ^(https?|oci)://
+                            type: string
+                          version:
+                            description: |-
+                              Version is the exact chart version to pull (SemVer 2, e.g. "1.2.3").
+                              Must follow SemVer 2 (https://semver.org): MAJOR.MINOR.PATCH with
+                              optional pre-release and build metadata.
+                            minLength: 5
+                            pattern: ^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$
+                            type: string
+                        required:
+                        - name
+                        - url
+                        - version
+                        type: object
+                    required:
+                    - repository
+                    type: object
+                  releaseName:
+                    description: |-
+                      ReleaseName is the Helm release name used during rendering.
+                      If omitted, defaults to the TemplateInstance name at render time.
+                    maxLength: 53
+                    type: string
+                  valuesTemplate:
+                    description: |-
+                      ValuesTemplate is a Go template that renders into YAML used as Helm values.
+                      The rendered YAML is parsed and passed as Helm value overrides
+                      (merged over the chart's default values.yaml).
+
+                      Available context (same as gotemplate):
+                      - .parameters : resolved parameter values
+                      - .instance   : metadata of the TemplateInstance (name, namespace, labels)
+                    type: string
+                  version:
+                    default: v4
+                    description: |-
+                      Version selects the Helm rendering engine.
+                      Defaults to "v4" if omitted.
+                    enum:
+                    - v3
+                    - v4
+                    type: string
+                required:
+                - chart
+                type: object
+              outputs:
+                description: |-
+                  Outputs declare named extractions from this Template's rendered resources,
+                  surfaced on TemplateInstance.status.outputs. Each entry chooses exactly one
+                  iteration mode by field combination:
+                    - from only          single-resource extraction
+                    - fromAll only        iterate all rendered resources of a GVK
+                    - from + forEach      iterate an array of objects inside one resource
+                items:
+                  description: TemplateOutput declares a named extraction from this
+                    Template's rendered resources.
+                  properties:
+                    fields:
+                      description: |-
+                        Fields are the JSONPath extractions performed against each matched resource
+                        (or, for forEach, each array element).
+                      items:
+                        description: OutputField is a single JSONPath extraction mapped
+                          to one outer status key.
+                        properties:
+                          jsonPath:
+                            description: |-
+                              JSONPath query wrapped in {...}. A scalar result is stored as-is; an
+                              array/object result is JSON-encoded (e.g. "{.foo[*].ip}" -> '["v4","v6"]').
+                            maxLength: 256
+                            minLength: 1
+                            type: string
+                            x-kubernetes-validations:
+                            - message: jsonPath must be a single JSONPath query wrapped
+                                in {...}
+                              rule: self.matches('^[{][^{}]*[}]$')
+                          name:
+                            description: |-
+                              Name is the OUTER key under status.outputs. Must be unique across the
+                              FLATTENED set of all outputs[].fields[].name in this Template (enforced by
+                              the Template reconciler).
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-zA-Z][a-zA-Z0-9]*$
+                            type: string
+                        required:
+                        - jsonPath
+                        - name
+                        type: object
+                      maxItems: 50
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
+                    forEach:
+                      description: |-
+                        ForEach iterates an array OF OBJECTS inside the resource named by `from`.
+                        JSONPath query wrapped in {...}; "{.__index}" (zero-based position) is
+                        available to keyTemplate. Required for forEach mode; absent otherwise.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                      x-kubernetes-validations:
+                      - message: forEach must be a single JSONPath query wrapped in
+                          {...}
+                        rule: self.matches('^[{][^{}]*[}]$')
+                    from:
+                      description: |-
+                        From selects a single rendered resource. Required for single-resource and
+                        forEach modes; must be absent in fromAll mode.
+                      properties:
+                        apiVersion:
+                          description: APIVersion of the source resource (e.g. "v1",
+                            "apps/v1").
+                          maxLength: 253
+                          type: string
+                          x-kubernetes-validations:
+                          - message: apiVersion must be 'version' or 'group/version'
+                              (at most one '/')
+                            rule: self.matches('^[^/]+(/[^/]+)?$')
+                        kind:
+                          description: |-
+                            Kind of the source resource. Kind: Secret is refused at admission because
+                            TemplateInstance status is broadly readable to anyone with get templateinstance.
+                          maxLength: 63
+                          type: string
+                          x-kubernetes-validations:
+                          - message: reading from Secrets is not allowed; status is
+                              broadly readable
+                            rule: self != 'Secret'
+                        name:
+                          description: |-
+                            Name is a JSONPath template ({...}) evaluated against the Template context
+                            ({"parameters": {...}, "instance": {name, namespace, labels}}). The rendered
+                            name must exist in status.renderedResources at extraction time.
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is a JSONPath template ({...}); defaults to the TemplateInstance's
+                            namespace when omitted. Ignored for cluster-scoped kinds.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      type: object
+                    fromAll:
+                      description: |-
+                        FromAll iterates every rendered resource matching the GVK. Mutually exclusive
+                        with from and forEach.
+                      properties:
+                        apiVersion:
+                          description: APIVersion of the source resources (e.g. "apps/v1").
+                          maxLength: 253
+                          type: string
+                          x-kubernetes-validations:
+                          - message: apiVersion must be 'version' or 'group/version'
+                              (at most one '/')
+                            rule: self.matches('^[^/]+(/[^/]+)?$')
+                        kind:
+                          description: 'Kind of the source resources. Kind: Secret
+                            is refused at admission.'
+                          maxLength: 63
+                          type: string
+                          x-kubernetes-validations:
+                          - message: reading from Secrets is not allowed; status is
+                              broadly readable
+                            rule: self != 'Secret'
+                        namespace:
+                          description: |-
+                            Namespace is a JSONPath template ({...}) scoping the iteration; when omitted,
+                            iterates across every namespace this instance rendered into.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      type: object
+                    keyTemplate:
+                      description: |-
+                        KeyTemplate renders the inner status-map key (JSONPath template, {...}).
+                        Required for forEach. Optional for fromAll (runtime scope-aware default:
+                        namespaced -> "{.metadata.namespace}/{.metadata.name}", cluster-scoped ->
+                        "{.metadata.name}"). Optional for single mode (defaults to "{.metadata.name}").
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    name:
+                      description: |-
+                        Name is the parent identifier for this output entry, unique across outputs[].
+                        It is NOT surfaced in TemplateInstance status; the user-visible status keys
+                        come from each fields[].name below.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-zA-Z][a-zA-Z0-9]*$
+                      type: string
+                  required:
+                  - fields
+                  - name
+                  type: object
+                maxItems: 50
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              parameters:
+                description: |-
+                  Parameters define the inputs required to render the template.
+
+                  Rules:
+                  - `type` is a hint used for validation/coercion (operator-defined).
+                items:
+                  description: TemplateParameterDefinition defines a single parameter
+                    for the template.
+                  properties:
+                    disableOverride:
+                      description: |-
+                        DisableOverride controls whether a TemplateInstance may supply its own
+                        value for this parameter. Defaults to false (allow override) when omitted.
+                      type: boolean
+                    exposeInStatus:
+                      description: |-
+                        ExposeInStatus controls whether the resolved value appears in
+                        TemplateInstance status resolvedParameters. Defaults to false (hidden).
+                      type: boolean
+                    name:
+                      description: Name is the name of the parameter
+                      minLength: 1
+                      type: string
+                    required:
+                      description: |-
+                        Required, if true, means the TemplateInstance MUST provide a value
+                        for this parameter, regardless of whether the template has a default.
+                      type: boolean
+                    type:
+                      description: |-
+                        Type declares the expected type for validation of both template
+                        default values and instance overrides.
+                      enum:
+                      - string
+                      - number
+                      - bool
+                      - array
+                      - object
+                      type: string
+                    value:
+                      description: |-
+                        Value provides the parameter's literal default. It may be a scalar
+                        (string, number, bool), a list, or an object, matching the declared type.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: parameter cannot be both required and non-overridable
+                    rule: '!(has(self.required) && self.required && has(self.disableOverride)
+                      && self.disableOverride)'
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              sync:
+                description: Sync controls drift protection for rendered resources.
+                properties:
+                  ignoreFields:
+                    description: |-
+                      IgnoreFields defines field paths that are exempt from enforcement.
+                      Changes to these fields are allowed even when sync is enabled.
+
+                      Field paths use dot-separated notation and are evaluated per rendered object.
+                      Array wildcards are supported via [*] notation.
+                      Examples: "metadata.annotations", "spec.replicas", "spec.template.spec.containers[*].env"
+                    items:
+                      type: string
+                    type: array
+                  mode:
+                    default: "off"
+                    description: |-
+                      Mode selects the drift protection strategy.
+
+                      - off (default): resources are created once with no ongoing enforcement.
+                      - revert: the controller continuously reconciles rendered resources,
+                        reverting external drift back to the desired state.
+                      - strict: same as revert, plus an admission webhook proactively blocks
+                        unauthorized UPDATE/DELETE on rendered resources.
+                    enum:
+                    - "off"
+                    - revert
+                    - strict
+                    type: string
+                type: object
+              targetNamespaces:
+                description: |-
+                  TargetNamespaces controls where this Template may be instantiated.
+
+                  Default behavior:
+                  If this field is omitted entirely, the Template may ONLY be instantiated
+                  in the same namespace as this Template.
+
+                  A namespace is eligible if it matches the explicit list OR the selector.
+                properties:
+                  explicit:
+                    description: |-
+                      Explicit defines allowed (and in future, denied) consumer namespaces
+                      where this Template may be instantiated.
+                    properties:
+                      allow:
+                        description: Allow permits only the strings listed in Literal.
+                        properties:
+                          literal:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                      deny:
+                        description: Deny rejects the strings listed in Literal.
+                        properties:
+                          literal:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                    type: object
+                  selector:
+                    description: Selector dynamically selects namespaces via labels.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of gotemplate or helm must be specified
+              rule: has(self.gotemplate) != has(self.helm)
+            - message: 'each outputs entry must set exactly one combination: from-only,
+                fromAll-only, or from+forEach'
+              rule: '!has(self.outputs) || self.outputs.all(o, (has(o.from) && !has(o.fromAll)
+                && !has(o.forEach)) || (!has(o.from) && has(o.fromAll) && !has(o.forEach))
+                || (has(o.from) && !has(o.fromAll) && has(o.forEach)))'
+            - message: keyTemplate is required when forEach is set
+              rule: '!has(self.outputs) || self.outputs.all(o, has(o.forEach) ? has(o.keyTemplate)
+                : true)'
+          status:
+            description: TemplateStatus defines the observed state of Template.
+            properties:
+              conditions:
+                description: |-
+                  conditions describe fine-grained validation and availability states
+                  following standard Kubernetes condition conventions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: |-
+                  observedGeneration is the last generation of the Template
+                  that has been processed by the controller.
+                format: int64
+                type: integer
+              phase:
+                description: |-
+                  phase summarizes the overall validation state of the Template.
+                  Typical values: Valid, Invalid, Error
+                enum:
+                - Valid
+                - Invalid
+                - Error
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

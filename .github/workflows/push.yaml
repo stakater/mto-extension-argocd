@@ -1,0 +1,67 @@
+name: Push
+
+# Merging to main is the release: the chart is packaged and pushed at whatever
+# version Chart.yaml carries. helm-release refuses a version that is already
+# published (helm push itself would silently overwrite it), so a merge that
+# changes the chart without bumping Chart.yaml fails here, loudly, instead of
+# shipping nothing. There is no separate release workflow -- this repo is
+# chart-only, so there is no image to tag.
+on:
+  push:
+    branches:
+      - main
+    # Mirrors pull_request.yaml. The equivalence test's reference data lives in
+    # tests/render/testdata/ and cannot be regenerated, so nothing here may
+    # cover it.
+    paths-ignore:
+      - '**/*.md'
+      - 'examples/**'
+
+jobs:
+  push-chart:
+    name: Push Chart
+    # No [skip-ci] escape hatch: a release job must not be skippable by
+    # commit-message convention. One [skip-ci] commit in a merged batch would
+    # skip the whole publish -- version bumped, nothing shipped, and the Slack
+    # step below only fires on failure(), so nobody would be told. Docs-only
+    # pushes are already excluded by paths-ignore above.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same aggregate target as pull_request.yaml. No HELM override: the
+      # Makefile installs its own pinned helm, and the release below must be
+      # packaged by that same pinned version, not whatever is on PATH.
+      - name: Lint, vet and test
+        run: make test
+
+      - name: Package and push the chart
+        run: make helm-release
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+      # A red main here means the chart did not ship -- either the tests broke
+      # or the version was not bumped. Same channel the other extension repos
+      # notify.
+      #
+      # Pinned by SHA, not tag: this job carries GHCR_TOKEN and the Slack
+      # webhook, and a third-party tag can be moved to arbitrary code after
+      # review.
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@37ebaef184d7626c5f204ab8d3baff4262dd30f0 # v1.27.0
+        with:
+          payload: |
+            {
+              "text": "mto-extension-argocd: chart release failed on main. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAKATER_DELIVERY_SLACK_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

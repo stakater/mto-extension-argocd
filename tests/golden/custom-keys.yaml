@@ -1,0 +1,56 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: custom
+  namespace: argo-cd
+spec:
+  clusterResourceWhitelist:
+    - group: ""
+      kind: PersistentVolume
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: custom-dev
+      server: https://kubernetes.default.svc
+    - namespace: argo-cd
+      server: https://kubernetes.default.svc
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - custom-owner-group-9ecda0
+        - custom-owners
+      name: custom-owner
+      policies:
+        - p, proj:custom:custom-owner, applications, *, custom/*, allow
+        - p, proj:custom:custom-owner, applicationsets, *, custom/*, allow
+        - p, proj:custom:custom-owner, logs, *, custom/*, allow
+        - p, proj:custom:custom-owner, exec, *, custom/*, allow
+        - p, proj:custom:custom-owner, repositories, *, custom/*, allow
+        - p, proj:custom:custom-owner, clusters, *, custom/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - custom-edit-group-0f43ea
+      name: custom-edit
+      policies:
+        - p, proj:custom:custom-edit, applications, *, custom/*, allow
+        - p, proj:custom:custom-edit, applicationsets, *, custom/*, allow
+        - p, proj:custom:custom-edit, logs, *, custom/*, allow
+        - p, proj:custom:custom-edit, exec, *, custom/*, allow
+        - p, proj:custom:custom-edit, repositories, *, custom/*, allow
+        - p, proj:custom:custom-edit, clusters, *, custom/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - custom-view-group-8efadb
+      name: custom-view
+      policies:
+        - p, proj:custom:custom-view, applications, get, custom/*, allow
+        - p, proj:custom:custom-view, applicationsets, get, custom/*, allow
+        - p, proj:custom:custom-view, logs, get, custom/*, allow
+        - p, proj:custom:custom-view, exec, get, custom/*, allow
+        - p, proj:custom:custom-view, repositories, get, custom/*, allow
+        - p, proj:custom:custom-view, clusters, get, custom/*, allow
+  sourceRepos:
+    - https://git.acme.example/custom.git

@@ -1,0 +1,52 @@
+# Two destination edge cases that are easy to get wrong and invisible in a
+# normal cluster.
+#
+#   shares-argo-ns  The ArgoCD namespace itself carries this tenant's label and
+#                   is not privileged, so the parent already put it in the
+#                   namespace list. The child appends the ArgoCD namespace
+#                   unconditionally (it must be a destination even when
+#                   privileged), which without a guard lists it twice. A
+#                   duplicate destination is not fatal to ArgoCD, but it churns
+#                   the object on every apply and makes the equivalence diff
+#                   unreadable.
+#
+#   no-namespaces   A tenant with zero labelled namespaces still gets an
+#                   AppProject, with the ArgoCD namespace as its only
+#                   destination. It must NOT be skipped: openbao's parent skips
+#                   namespace-less tenants because its child resolves workloads
+#                   through a namespaceSelector and would fail validation, but
+#                   this chart has no namespaceSelector, and skipping here
+#                   would silently delete a real tenant's AppProject the moment
+#                   its last namespace went away.
+#
+#   The empty list also has to survive as JSON: a comma-joined empty list would
+#   be "", which ResolveParameterValue treats as unset and rejects outright.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: shares-argo-ns
+      spec:
+        accessControl:
+          owners: { users: [ops@example.com] }
+    - metadata:
+        name: no-namespaces
+      spec:
+        accessControl:
+          owners: { users: [ops@example.com] }
+
+  namespaces:
+    - metadata: { name: shares-argo-ns-dev, labels: { stakater.com/tenant: shares-argo-ns } }
+    - metadata: { name: openshift-gitops, labels: { stakater.com/tenant: shares-argo-ns } }

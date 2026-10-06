@@ -1,0 +1,101 @@
+name: E2E
+
+# Not on every push. The suite builds a whole cluster -- kind, cert-manager,
+# ArgoCD, template-operator-v2 -- and takes about twelve minutes, where the
+# chart tests in pull_request.yaml take seconds and catch most regressions. So
+# it runs when a human asks for it: on approval, or by adding the label.
+#
+# No secrets. Every component it installs is an anonymous pull, including
+# template-operator-v2, which has a public release at
+# ghcr.io/stakater/public/. That is worth preserving: a fork can run this.
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+# One run per PR at a time: two approvals, or a label plus a dispatch, would
+# otherwise build two twelve-minute clusters for the same commit.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-label:
+    name: Verify Label
+    # The approval path checks WHO approved: an approval-triggered run executes
+    # PR-authored code (Makefile, hack/e2e scripts, Go tests) via the merge
+    # ref, and on a public repo any account can submit an approving review.
+    # The gate limits that to OWNER/MEMBER/COLLABORATOR associations -- not a
+    # guarantee of write access (MEMBER is org membership, COLLABORATOR
+    # includes read/triage grants), but it excludes drive-by accounts, which
+    # is the attack this closes. The other two triggers carry their own bars:
+    # applying the label needs triage on this repo, a dispatch needs write.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) || github.event.label.name == 'ok-to-test/kubernetes' }}
+    runs-on: ubuntu-latest
+    # Stated rather than inherited: removing a label needs write, and a repo
+    # whose default token is read-only would otherwise fail this step at the
+    # gate instead of running the suite.
+    permissions:
+      pull-requests: write
+    steps:
+      # Removed so the next run needs a fresh request, rather than the label
+      # sitting there and re-triggering on unrelated events.
+      #
+      # continue-on-error: a fork PR's token is read-only regardless of the
+      # permissions block above, so this step 403s there. That must not gate
+      # the suite -- for a fork the label stays on and can re-trigger, which is
+      # the lesser evil against "a fork can never run this at all".
+      #
+      # Pinned by SHA, not tag: this job holds pull-requests: write, and a
+      # third-party tag can be moved to arbitrary code after review.
+      - name: Remove the test label
+        if: ${{ github.event.label.name == 'ok-to-test/kubernetes' }}
+        continue-on-error: true
+        uses: actions-ecosystem/action-remove-labels@2ce5d41b4b6aa8503e285553f75ed56e0a40bae0 # v1
+        with:
+          labels: ok-to-test/kubernetes
+
+  e2e:
+    name: Kind E2E
+    needs: verify-label
+    runs-on: ubuntu-latest
+    # The suite talks to a kind cluster on this runner and to nothing else. It
+    # needs no token at all beyond reading the code.
+    permissions:
+      contents: read
+    steps:
+      # For pull_request events the default ref is already the PR merge ref,
+      # but for pull_request_review it is the DEFAULT BRANCH: an approval-
+      # triggered run would build main, report green, and gate nothing. The
+      # expression falls back to the default for workflow_dispatch.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || '' }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # kind runs on the runner itself; there is no pre-provisioned cluster.
+      # The same command a developer runs locally, so a CI-only failure means
+      # the environment differs, not the harness. No HELM override: the
+      # Makefile installs its own pinned helm, and overriding it here is how
+      # CI once drifted onto whatever helm was on PATH (see the e2e-test
+      # target's comment).
+      - name: Build the cluster and run the suite
+        run: make e2e-kind
+
+      # make e2e-kind writes these on any failure in the chain -- cluster
+      # build, dependency install, or the suite. `warn` rather than `ignore`:
+      # a missing directory here means the diagnostics path itself broke, and
+      # that deserves a visible notice, not silence.
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ github.run_id }}
+          path: ./e2e-logs/
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,649 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: templateinstances.templates.v2.stakater.com
+spec:
+  group: templates.v2.stakater.com
+  names:
+    kind: TemplateInstance
+    listKind: TemplateInstanceList
+    plural: templateinstances
+    singular: templateinstance
+  scope: Namespaced
+  versions:
+  - name: v2alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TemplateInstance represents a consumer's request to instantiate a Template.
+          It creates actual Kubernetes resources in the consumer's namespace by rendering
+          the referenced Template with provided or overridden parameters.
+
+          Namespace Scope (Consumer):
+          The TemplateInstance is created in a consumer namespace.
+          Any instance-provided overrides that read from ConfigMaps, Secrets, or other resources
+          are resolved from the namespace specified in the KeyRef or ObjectFieldRef.
+          When a KeyRef omits the namespace, it defaults to the TemplateInstance's namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TemplateInstanceSpec defines the desired state of TemplateInstance.
+            properties:
+              parameters:
+                description: |-
+                  Parameters override the parameters defined in the referenced Template.
+
+                  Validation:
+                  - A parameter override is only allowed if the corresponding Template parameter has
+                    `disableOverride: false` set (or omitted, since it defaults to false).
+                  - If a parameter is not overridden here, the Template's default definition is used.
+                items:
+                  description: TemplateParameter defines a single parameter for TemplateInstance
+                    overrides.
+                  properties:
+                    defaultValue:
+                      description: |-
+                        DefaultValue is used when `valueFrom` fails.
+                        Only valid with valueFrom.
+                      type: string
+                    name:
+                      description: Name is the name of the parameter
+                      minLength: 1
+                      type: string
+                    value:
+                      description: |-
+                        Option 1 (literal): string|number|bool
+                        Value provides a literal parameter value (string, number, or bool).
+                      type: string
+                    valueFrom:
+                      description: |-
+                        Option 2: read a value dynamically from a cluster resource.
+                        Exactly one of `value` or `valueFrom` must be set.
+                      maxProperties: 1
+                      minProperties: 1
+                      properties:
+                        configMapKeyRef:
+                          description: ConfigMapKeyRef reads a key from a ConfigMap.
+                          properties:
+                            key:
+                              description: Key within the Secret or ConfigMap data
+                                to read.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name of the Secret or ConfigMap.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the Secret or ConfigMap.
+                                When omitted, defaults to the TemplateInstance's namespace.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        objectFieldRef:
+                          description: ObjectFieldRef reads a field via JSONPath from
+                            an arbitrary resource.
+                          properties:
+                            apiVersion:
+                              description: APIVersion of the target resource (e.g.,
+                                "networking.k8s.io/v1").
+                              minLength: 1
+                              type: string
+                            jsonPath:
+                              description: |-
+                                JSONPath expression to extract the value (without curly braces).
+                                Must start with a dot (e.g., ".metadata.name", not "{.metadata.name}").
+                                Examples: .status.loadBalancer.ingress[0].ip, .metadata.name, .items[*].metadata.name
+                              minLength: 1
+                              type: string
+                              x-kubernetes-validations:
+                              - message: jsonPath must start with a dot (e.g. '.metadata.name')
+                                rule: self.startsWith('.')
+                              - message: jsonPath must not be wrapped in curly braces;
+                                  the operator wraps the expression internally
+                                rule: '!(self.startsWith(''{'') && self.endsWith(''}''))'
+                            kind:
+                              description: Kind of the target resource (e.g., "Ingress").
+                              minLength: 1
+                              type: string
+                            name:
+                              description: |-
+                                Name of the target resource. When omitted, the operator LISTs all
+                                resources of this GVK and evaluates JSONPath over the list result.
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the target resource.
+                                When empty, namespaced resources are listed across all namespaces;
+                                cluster-scoped resources ignore this field.
+                                Mutually exclusive with NamespaceSelector.
+                              type: string
+                            namespaceSelector:
+                              description: |-
+                                NamespaceSelector matches the namespaces in which to LIST/watch the
+                                target GVK. Only meaningful in LIST mode (Name empty). The matched
+                                namespace set is kept current as namespaces are created, deleted, or
+                                relabeled.
+
+                                Mutually exclusive with Namespace. Has no effect on cluster-scoped
+                                target GVKs (operator surfaces an error at resolution time).
+
+                                RBAC: requires the operator's ServiceAccount to have
+                                namespaces: list, watch.
+                              properties:
+                                matchExpressions:
+                                  description: matchExpressions is a list of label
+                                    selector requirements. The requirements are ANDed.
+                                  items:
+                                    description: |-
+                                      A label selector requirement is a selector that contains values, a key, and an operator that
+                                      relates the key and values.
+                                    properties:
+                                      key:
+                                        description: key is the label key that the
+                                          selector applies to.
+                                        type: string
+                                      operator:
+                                        description: |-
+                                          operator represents a key's relationship to a set of values.
+                                          Valid operators are In, NotIn, Exists and DoesNotExist.
+                                        type: string
+                                      values:
+                                        description: |-
+                                          values is an array of string values. If the operator is In or NotIn,
+                                          the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                          the values array must be empty. This array is replaced during a strategic
+                                          merge patch.
+                                        items:
+                                          type: string
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                    required:
+                                    - key
+                                    - operator
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - apiVersion
+                          - jsonPath
+                          - kind
+                          type: object
+                          x-kubernetes-validations:
+                          - message: namespace and namespaceSelector are mutually
+                              exclusive
+                            rule: '!(has(self.namespace) && has(self.namespaceSelector))'
+                          - message: namespaceSelector requires LIST mode (name must
+                              be empty)
+                            rule: '!has(self.namespaceSelector) || !has(self.name)'
+                          - message: namespaceSelector must specify a non-empty matchLabels
+                              or matchExpressions
+                            rule: '!has(self.namespaceSelector) || (has(self.namespaceSelector.matchLabels)
+                              && size(self.namespaceSelector.matchLabels) > 0) ||
+                              (has(self.namespaceSelector.matchExpressions) && size(self.namespaceSelector.matchExpressions)
+                              > 0)'
+                        secretKeyRef:
+                          description: SecretKeyRef reads a key from a Secret.
+                          properties:
+                            key:
+                              description: Key within the Secret or ConfigMap data
+                                to read.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name of the Secret or ConfigMap.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the Secret or ConfigMap.
+                                When omitted, defaults to the TemplateInstance's namespace.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: defaultValue is only allowed with valueFrom
+                    rule: '!(has(self.defaultValue) && !has(self.valueFrom))'
+                  - message: value and defaultValue are mutually exclusive
+                    rule: '!(has(self.value) && has(self.defaultValue))'
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: each parameter must set exactly one of value or valueFrom
+                  rule: self.all(p, has(p.value) != has(p.valueFrom))
+              templateRef:
+                description: |-
+                  templateRef points to the provider-scoped Template to instantiate.
+                  This is a cross-namespace reference by design
+                properties:
+                  name:
+                    description: Name of the Template resource
+                    type: string
+                  namespace:
+                    description: Namespace where the Template resource is located
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+            required:
+            - templateRef
+            type: object
+          status:
+            description: TemplateInstanceStatus defines the observed state of TemplateInstance.
+            properties:
+              conditions:
+                description: conditions represent the latest available observations
+                  of the TemplateInstance's state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              matchedNamespaces:
+                description: |-
+                  matchedNamespaces lists the namespaces resolved by any parameter whose
+                  objectFieldRef.namespaceSelector matched a non-empty set on the last
+                  reconcile. Populated only when at least one such parameter exists.
+                  Useful for debugging "why does my TI include / exclude this namespace?".
+
+                  The list is bounded — selectors matching more than 100 namespaces are
+                  truncated and the truncated set is logged.
+                items:
+                  type: string
+                maxItems: 100
+                type: array
+                x-kubernetes-list-type: set
+              observedGeneration:
+                description: observedGeneration represents the .metadata.generation
+                  that the controller last successfully reconciled.
+                format: int64
+                type: integer
+              outputs:
+                additionalProperties:
+                  additionalProperties:
+                    type: string
+                  type: object
+                description: |-
+                  outputs maps each Template output field name (outer key) to a map of
+                  rendered keyTemplate (inner key) -> extracted value. Populated from
+                  Template.spec.outputs against this instance's rendered resources.
+                type: object
+              outputsObservedAt:
+                description: |-
+                  outputsObservedAt is the time the output values (the outputs map) last changed.
+                  It advances only when a resolution produces a different map than the stored one,
+                  not on every check and not when only the OutputsResolved condition message
+                  changes while the values are unchanged. It is a last-value-change marker, not a
+                  liveness probe; condition status transitions are timestamped separately by the
+                  OutputsResolved condition's own lastTransitionTime.
+                format: date-time
+                type: string
+              phase:
+                description: phase summarizes the overall validation state of the
+                  Template.
+                enum:
+                - Ready
+                - Failed
+                type: string
+              renderedResources:
+                description: |-
+                  renderedResources list the resources created by this TemplateInstance.
+
+                  IMPORTANT:
+                  This list contains ONLY the minimum identifying information required
+                  to locate the rendered resources (apiVersion, kind, name, namespace).
+
+                  It MUST NOT be treated as a source of truth for desired or live state,
+                  and MUST NOT embed full object specs or status.
+                items:
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the resource (e.g., "v1", "apps/v1")
+                      minLength: 1
+                      type: string
+                    kind:
+                      description: kind of the resource (e.g, "ConfigMap, "Deployment")
+                      minLength: 1
+                      type: string
+                    name:
+                      description: name of the resource
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    namespace:
+                      description: namespace of the resource
+                      maxLength: 63
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration is the metadata.generation of this resource
+                        at the time it was last successfully applied by the controller.
+                      format: int64
+                      type: integer
+                    status:
+                      description: status indicates the health of this resource. Empty
+                        means successfully applied.
+                      enum:
+                      - ""
+                      - Failed
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                maxItems: 500
+                type: array
+                x-kubernetes-list-type: atomic
+              resolvedParameters:
+                description: |-
+                  resolvedParameters exposes the final parameter values used for rendering
+                  AFTER merging Template defaults and Instance overrides.
+                items:
+                  description: |-
+                    ResolvedParameter records the source and optionally the value used for a parameter
+                    after merging Template defaults and Instance overrides.
+                  properties:
+                    name:
+                      description: Name of the parameter.
+                      type: string
+                    value:
+                      description: |-
+                        Value is the resolved parameter value. Only populated when the
+                        Template parameter has exposeInStatus: true.
+                      type: string
+                    valueFrom:
+                      description: |-
+                        ValueFrom records the source that was used to resolve this parameter,
+                        when the value came from a dynamic source (secret, configmap, resource).
+                      maxProperties: 1
+                      minProperties: 1
+                      properties:
+                        configMapKeyRef:
+                          description: ConfigMapKeyRef reads a key from a ConfigMap.
+                          properties:
+                            key:
+                              description: Key within the Secret or ConfigMap data
+                                to read.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name of the Secret or ConfigMap.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the Secret or ConfigMap.
+                                When omitted, defaults to the TemplateInstance's namespace.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        objectFieldRef:
+                          description: ObjectFieldRef reads a field via JSONPath from
+                            an arbitrary resource.
+                          properties:
+                            apiVersion:
+                              description: APIVersion of the target resource (e.g.,
+                                "networking.k8s.io/v1").
+                              minLength: 1
+                              type: string
+                            jsonPath:
+                              description: |-
+                                JSONPath expression to extract the value (without curly braces).
+                                Must start with a dot (e.g., ".metadata.name", not "{.metadata.name}").
+                                Examples: .status.loadBalancer.ingress[0].ip, .metadata.name, .items[*].metadata.name
+                              minLength: 1
+                              type: string
+                              x-kubernetes-validations:
+                              - message: jsonPath must start with a dot (e.g. '.metadata.name')
+                                rule: self.startsWith('.')
+                              - message: jsonPath must not be wrapped in curly braces;
+                                  the operator wraps the expression internally
+                                rule: '!(self.startsWith(''{'') && self.endsWith(''}''))'
+                            kind:
+                              description: Kind of the target resource (e.g., "Ingress").
+                              minLength: 1
+                              type: string
+                            name:
+                              description: |-
+                                Name of the target resource. When omitted, the operator LISTs all
+                                resources of this GVK and evaluates JSONPath over the list result.
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the target resource.
+                                When empty, namespaced resources are listed across all namespaces;
+                                cluster-scoped resources ignore this field.
+                                Mutually exclusive with NamespaceSelector.
+                              type: string
+                            namespaceSelector:
+                              description: |-
+                                NamespaceSelector matches the namespaces in which to LIST/watch the
+                                target GVK. Only meaningful in LIST mode (Name empty). The matched
+                                namespace set is kept current as namespaces are created, deleted, or
+                                relabeled.
+
+                                Mutually exclusive with Namespace. Has no effect on cluster-scoped
+                                target GVKs (operator surfaces an error at resolution time).
+
+                                RBAC: requires the operator's ServiceAccount to have
+                                namespaces: list, watch.
+                              properties:
+                                matchExpressions:
+                                  description: matchExpressions is a list of label
+                                    selector requirements. The requirements are ANDed.
+                                  items:
+                                    description: |-
+                                      A label selector requirement is a selector that contains values, a key, and an operator that
+                                      relates the key and values.
+                                    properties:
+                                      key:
+                                        description: key is the label key that the
+                                          selector applies to.
+                                        type: string
+                                      operator:
+                                        description: |-
+                                          operator represents a key's relationship to a set of values.
+                                          Valid operators are In, NotIn, Exists and DoesNotExist.
+                                        type: string
+                                      values:
+                                        description: |-
+                                          values is an array of string values. If the operator is In or NotIn,
+                                          the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                          the values array must be empty. This array is replaced during a strategic
+                                          merge patch.
+                                        items:
+                                          type: string
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                    required:
+                                    - key
+                                    - operator
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - apiVersion
+                          - jsonPath
+                          - kind
+                          type: object
+                          x-kubernetes-validations:
+                          - message: namespace and namespaceSelector are mutually
+                              exclusive
+                            rule: '!(has(self.namespace) && has(self.namespaceSelector))'
+                          - message: namespaceSelector requires LIST mode (name must
+                              be empty)
+                            rule: '!has(self.namespaceSelector) || !has(self.name)'
+                          - message: namespaceSelector must specify a non-empty matchLabels
+                              or matchExpressions
+                            rule: '!has(self.namespaceSelector) || (has(self.namespaceSelector.matchLabels)
+                              && size(self.namespaceSelector.matchLabels) > 0) ||
+                              (has(self.namespaceSelector.matchExpressions) && size(self.namespaceSelector.matchExpressions)
+                              > 0)'
+                        secretKeyRef:
+                          description: SecretKeyRef reads a key from a Secret.
+                          properties:
+                            key:
+                              description: Key within the Secret or ConfigMap data
+                                to read.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name of the Secret or ConfigMap.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the Secret or ConfigMap.
+                                When omitted, defaults to the TemplateInstance's namespace.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              resolvedTemplateRef:
+                description: |-
+                  resolvedTemplateRef shows the exact Template used for rendering,
+                  including its namespace and resourceVersion.
+                properties:
+                  generation:
+                    description: Generation of the Template which increments on spec
+                      changes
+                    format: int64
+                    type: integer
+                  name:
+                    description: Name of the Template resource
+                    type: string
+                  namespace:
+                    description: Namespace where the Template resource is located
+                    type: string
+                required:
+                - generation
+                - name
+                - namespace
+                type: object
+              trackedGVKs:
+                description: trackedGVKs is the set of GroupVersionKinds this TemplateInstance
+                  has rendered.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,56 @@
+{{- /*
+The only TemplateInstance in git. Everything else -- one child per tenant -- is
+rendered by the parent.
+
+Three parameters, three watches, independent of tenant count. Verified live: a
+Namespace event, a Tenant annotation and an IntegrationConfig patch each
+re-rendered the parent, and only the affected tenant's child was rewritten.
+*/ -}}
+apiVersion: templates.v2.stakater.com/v2alpha1
+kind: TemplateInstance
+metadata:
+  name: {{ include "mto-extension-argocd.parentTemplateName" . }}
+  namespace: {{ .Values.operatorNamespace }}
+  labels:
+    {{- include "mto-extension-argocd.labels" . | nindent 4 }}
+spec:
+  templateRef:
+    name: {{ include "mto-extension-argocd.parentTemplateName" . }}
+    namespace: {{ .Values.operatorNamespace }}
+  parameters:
+    {{- /* No name -> cluster-wide LIST, watched. A LIST always returns a
+           slice, so a cluster with zero Tenants ranges over nothing rather
+           than failing. */}}
+    - name: tenants
+      valueFrom:
+        objectFieldRef:
+          apiVersion: tenantoperator.stakater.com/v1beta3
+          kind: Tenant
+          jsonPath: .items
+    {{- /* Cluster-wide, filtered per tenant inside the gotemplate. Not a
+           namespaceSelector: that scopes where to look for a namespaced kind,
+           is not a filter on Namespace objects, and errors on cluster-scoped
+           targets. */}}
+    - name: namespaces
+      valueFrom:
+        objectFieldRef:
+          apiVersion: v1
+          kind: Namespace
+          jsonPath: .items
+    {{- /* Named + namespaced -> GET, evaluated as JSONPath over the whole
+           object. Read shallowly at .spec and dig in the template: a deep path
+           like .spec.accessControl.privileged fails the parent outright when
+           the field is absent.
+
+           NEVER give this parameter a defaultValue. Masking a failed read
+           yields an empty privileged list, which puts privileged namespaces
+           into every tenant's destinations -- cross-tenant exposure. Failing
+           the parent is fail-closed, and matches MTO's own [".*"] fallback. */}}
+    - name: integrationConfig
+      valueFrom:
+        objectFieldRef:
+          apiVersion: tenantoperator.stakater.com/v1beta1
+          kind: IntegrationConfig
+          name: {{ .Values.integrationConfig.name }}
+          namespace: {{ .Values.integrationConfig.namespace }}
+          jsonPath: .spec

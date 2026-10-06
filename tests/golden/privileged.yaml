@@ -1,0 +1,111 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: tenant-a
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: tenant-a-dev
+      server: https://kubernetes.default.svc
+    - namespace: tenant-a-prod
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-a-owner-group-571c83
+        - system-admins
+        - tenant-a-owners
+        - alice@example.com
+      name: tenant-a-owner
+      policies:
+        - p, proj:tenant-a:tenant-a-owner, applications, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, applicationsets, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, logs, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, exec, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, repositories, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, clusters, *, tenant-a/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-a-edit-group-35f088
+        - system-admins
+        - tenant-a-editors
+      name: tenant-a-edit
+      policies:
+        - p, proj:tenant-a:tenant-a-edit, applications, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applicationsets, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, logs, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, exec, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, repositories, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, clusters, *, tenant-a/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-a-view-group-883af2
+        - system-admins
+        - bob@example.com
+      name: tenant-a-view
+      policies:
+        - p, proj:tenant-a:tenant-a-view, applications, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-view, applicationsets, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-view, logs, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-view, exec, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-view, repositories, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-view, clusters, get, tenant-a/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: tenant-b
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: tenant-b-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-b-owner-group-5719c4
+        - system-admins
+        - tenant-b-owners
+      name: tenant-b-owner
+      policies:
+        - p, proj:tenant-b:tenant-b-owner, applications, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, applicationsets, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, logs, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, exec, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, repositories, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, clusters, *, tenant-b/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-b-edit-group-50762d
+        - system-admins
+      name: tenant-b-edit
+      policies:
+        - p, proj:tenant-b:tenant-b-edit, applications, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applicationsets, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, logs, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, exec, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, repositories, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, clusters, *, tenant-b/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - tenant-b-view-group-fea1db
+        - system-admins
+      name: tenant-b-view
+      policies:
+        - p, proj:tenant-b:tenant-b-view, applications, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-view, applicationsets, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-view, logs, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-view, exec, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-view, repositories, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-view, clusters, get, tenant-b/*, allow

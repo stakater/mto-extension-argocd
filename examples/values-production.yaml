@@ -1,0 +1,81 @@
+# Chart values for a real installation.
+#
+# examples/values-minimal.yaml is the smallest thing that installs. This is the
+# smallest thing that gives tenants a working ArgoCD project.
+#
+#   helm install mto-extension-argocd ./charts/mto-extension-argocd \
+#     -n multi-tenant-operator -f examples/values-production.yaml
+
+argocd:
+  # REQUIRED. Where ArgoCD runs; every AppProject is created here and it is
+  # always a destination.
+  namespace: openshift-gitops
+
+  sourceRepos:
+    # Set this. An AppProject with no sourceRepos permits NO repository, so
+    # every Application is rejected with "application repo ... is not permitted
+    # in project" -- the tenant has a project that cannot deploy anything.
+    #
+    # There is no safe shared value: one org-wide repo would let every tenant
+    # deploy from every other tenant's code. The only shareable form is a
+    # pattern templated on the tenant name, which is what each entry here is.
+    # A tenant needing something different overrides the whole list with the
+    # source-repos annotation.
+    #
+    # Only {{ tenant }} and {{tenant}} are substituted. Any other placeholder
+    # is refused at install time rather than shipped into a live AppProject.
+    # Each entry becomes one sourceRepos entry.
+    pattern:
+      - https://github.com/acme/{{ tenant }}-gitops
+      - https://github.com/acme/{{ tenant }}-charts
+
+  # Cluster-scoped kinds tenants may manage, and namespaced kinds they may not.
+  #
+  # Coming from ExtensionsArgoCDReconciler? Copy these from the live
+  # IntegrationConfig's .spec.integrations.argocd, which is deprecated and no
+  # longer read. Miss them and every tenant's AppProject silently loses both
+  # lists.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+
+scaffolding:
+  # Nothing is scaffolded until a Tenant is annotated. Prefer this to Always:
+  # it is the only thing preventing an accidental collision with a still-running
+  # ExtensionsArgoCDReconciler, and narrowing the mode later removes the
+  # AppProjects it excludes: released and kept on template-operator-v2 v0.0.7
+  # and later with purge off, DELETED on v0.0.6 and earlier.
+  mode: OnAnnotation
+
+# Where MTO's IntegrationConfig lives. Supplies accessControl.privileged only --
+# the namespaces excluded from every tenant's destinations, and the groups added
+# to every role.
+integrationConfig:
+  name: tenant-operator-config
+  namespace: multi-tenant-operator
+
+# The ServiceAccount template-operator-v2 runs as. Must match your install, or
+# nothing has permission to create AppProjects.
+rbac:
+  create: true
+  serviceAccount:
+    name: template-operator-v2
+    namespace: stakater-template-operator
+
+# Defaults shown for clarity -- both are already the chart's defaults.
+#
+# strict makes the admission webhook refuse hand-edits and deletes of a managed
+# AppProject. Under the looser `revert`, a deleted AppProject wedges in
+# Terminating forever while its TemplateInstance still reports healthy.
+#
+# Both exemptions are mandatory: without metadata.finalizers the operator cannot
+# manage its own finalizer and teardown deadlocks; without
+# spec.roles[*].jwtTokens the webhook denies `argocd proj role create-token`.
+sync:
+  mode: strict
+  ignoreFields:
+    - metadata.finalizers
+    - spec.roles[*].jwtTokens

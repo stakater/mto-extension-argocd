@@ -1,0 +1,48 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches: [main]
+    # The equivalence test reads its reference data from tests/render/testdata/
+    # -- the captured output of the Go controller, which cannot be regenerated
+    # once the controller is removed. It sits under tests/, so no entry below
+    # can let a change to it skip a job.
+    paths-ignore:
+      - '**/*.md'
+      - 'examples/**'
+
+jobs:
+  # No image and no private module dependencies -- the Go module here exists
+  # only for the render tests and pulls sprig and yaml.v3, both public. So no
+  # STAKATER_AB_REPOS auth is needed.
+  chart-tests:
+    name: Chart Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # One step, calling the same aggregate target a developer runs locally.
+      # This used to be three steps naming the individual targets, which meant
+      # `make test` and CI were two hand-maintained lists of the same thing: a
+      # target added to one would silently not run in the other, and CI would
+      # stay green with the coverage simply absent. Each sub-target still echoes
+      # its own command, so a failed run still says which one broke.
+      #
+      # No HELM override, matching push.yaml: the Makefile installs its own
+      # pinned helm into bin/. This step used to install helm via azure/setup-helm
+      # and pass HELM=helm, which collided with the .PHONY helm target, still
+      # downloaded the pinned binary, and then linted with whatever was on PATH.
+      #
+      # What it covers:
+      #   helm-lint         the chart lints strict
+      #   vet               go vet, plus a gofmt check
+      #   helm-render-test  both gotemplates executed against fixtures, output
+      #                     diffed against the golden AppProjects
+      #   admission-test    a real kube-apiserver carrying template-operator-v2's
+      #                     CRDs accepts what the chart renders -- structural
+      #                     schema plus CEL rules. No cluster required.
+      - name: Lint, vet and test
+        run: make test

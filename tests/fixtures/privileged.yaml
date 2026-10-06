@@ -1,0 +1,102 @@
+# Privileged namespace exclusion.
+#
+# This is the first test in the repo on purpose. It is the only untested path
+# whose failure mode is cross-tenant exposure: a namespace that should have
+# been excluded lands in a tenant's AppProject destinations, and that tenant's
+# ArgoCD can then deploy into it. MTO's managed-prefix webhook refuses to
+# create namespaces like `my-openshift-tools` under a tenant, so this cannot be
+# reproduced on a real cluster -- it can only be pinned here.
+#
+# The behaviour under test is the UNANCHORED match. The controller this
+# replaces uses regexp.MatchString, which is a substring match unless the
+# pattern is anchored, and sprig's regexMatch is the same. So the pattern
+# `openshift` also excludes `my-openshift-tools`, and `default` also excludes
+# `tenant-a-default-pool`. That is existing behaviour, reproduced deliberately;
+# this fixture exists so that "fixing" it is a visible golden diff and not an
+# accident.
+#
+# Also pinned here:
+#   the ArgoCD namespace is a destination even though it matches
+#          ^openshift.* and would otherwise be filtered out.
+#   the privileged groups from the IntegrationConfig land in every role, after
+#          the generated group and before the tenant's own.
+#   tenant-b proves the filter is per-tenant: none of tenant-a's namespaces
+#          appear in tenant-b's project.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces:
+          - "^openshift.*"
+          # Unanchored on purpose. Also excludes my-openshift-tools.
+          - "openshift"
+          - "^kube.*"
+          # Unanchored on purpose. Also excludes tenant-a-default-pool.
+          - "default"
+        groups:
+          - system-admins
+        serviceAccounts:
+          - "^system:serviceaccount:kube.*"
+
+  tenants:
+    - metadata:
+        name: tenant-a
+      spec:
+        accessControl:
+          owners:
+            groups: [tenant-a-owners]
+            users: [alice@example.com]
+          editors:
+            groups: [tenant-a-editors]
+          viewers:
+            users: [bob@example.com]
+    - metadata:
+        name: tenant-b
+      spec:
+        accessControl:
+          owners:
+            groups: [tenant-b-owners]
+
+  namespaces:
+    # Kept.
+    - metadata:
+        name: tenant-a-dev
+        labels: { stakater.com/tenant: tenant-a }
+    - metadata:
+        name: tenant-a-prod
+        labels: { stakater.com/tenant: tenant-a }
+    # Excluded by the UNANCHORED `openshift` pattern. The quirk under test.
+    - metadata:
+        name: my-openshift-tools
+        labels: { stakater.com/tenant: tenant-a }
+    # Excluded by ^openshift.*
+    - metadata:
+        name: openshift-tenant-a
+        labels: { stakater.com/tenant: tenant-a }
+    # Excluded by ^kube.*
+    - metadata:
+        name: kube-tenant-a
+        labels: { stakater.com/tenant: tenant-a }
+    # Excluded by the UNANCHORED `default` pattern. The quirk again, in a
+    # position where a reader would not expect it.
+    - metadata:
+        name: tenant-a-default-pool
+        labels: { stakater.com/tenant: tenant-a }
+    # Kept for tenant-b, and must not appear under tenant-a.
+    - metadata:
+        name: tenant-b-dev
+        labels: { stakater.com/tenant: tenant-b }
+    # Not labelled for any tenant.
+    - metadata:
+        name: default
+    # The ArgoCD namespace itself matches ^openshift.* -- and is still a
+    # destination for both tenants.
+    - metadata:
+        name: openshift-gitops

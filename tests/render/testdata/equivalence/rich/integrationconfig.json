@@ -1,0 +1,93 @@
+{
+  "apiVersion": "tenantoperator.stakater.com/v1beta1",
+  "kind": "IntegrationConfig",
+  "metadata": {
+    "name": "tenant-operator-config",
+    "namespace": "stakater-tenant-operator"
+  },
+  "spec": {
+    "accessControl": {
+      "namespaceAccessPolicy": {
+        "deny": {
+          "privilegedNamespaces": {}
+        }
+      },
+      "privileged": {
+        "groups": [
+          "review-platform-admins-b",
+          "review-platform-admins-a"
+        ],
+        "namespaces": [
+          "^default$",
+          "^openshift.*",
+          "^kube.*",
+          "^mto-extension-openbao-system$",
+          "^openbao$",
+          "^cert-manager$",
+          "^stakater-template-operator$",
+          "^stakater-tenant-operator$",
+          "^mto-extension-grafana-system$",
+          "^telemetry$",
+          "^trace-demo-obs$",
+          "^sos-load-test$",
+          "^pe-load-test$",
+          "^grafana-operator$",
+          "^vault$",
+          "^vault-config$",
+          "^vault-config-operator$",
+          "^chart-repo$",
+          "^keycloak$",
+          "^dex$",
+          "t-c"
+        ],
+        "serviceAccounts": [
+          "^system:serviceaccount:openshift.*",
+          "^system:serviceaccount:kube.*",
+          "^system:serviceaccount:stakater-actions-runner-controller:actions-runner-controller-runner-deployment$"
+        ]
+      },
+      "rbac": {
+        "tenantRoles": {
+          "default": {
+            "editor": {
+              "clusterRoles": [
+                "edit"
+              ]
+            },
+            "owner": {
+              "clusterRoles": [
+                "admin"
+              ]
+            },
+            "viewer": {
+              "clusterRoles": [
+                "view"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "integrations": {
+      "argocd": {
+        "clusterResourceWhitelist": [
+          {
+            "group": "tronador.stakater.com",
+            "kind": "EnvironmentProvisioner"
+          },
+          {
+            "group": "",
+            "kind": "PersistentVolume"
+          }
+        ],
+        "namespace": "stakater-tenant-operator",
+        "namespaceResourceBlacklist": [
+          {
+            "group": "",
+            "kind": "ResourceQuota"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,80 @@
+# Custom keys for every annotation key the parent reads off a Tenant, plus the
+# tenant-namespace label. (The scaffolding LABEL key gets the same treatment in
+# scaffolding-onlabel.yaml -- OnLabel and OnAnnotation are exclusive modes, so
+# one fixture cannot exercise both.) Every other fixture uses the chart
+# defaults, so a gotemplate that hardcoded a default key instead of reading its
+# parameter would pass the whole suite -- while every user with custom keys got
+# empty destinations or ignored overrides, silently.
+#
+# The DEFAULT keys appear here as decoys, so this golden also proves they are
+# IGNORED once a custom key is configured:
+#
+#   custom     opted in under the custom annotation; whitelist, sourceRepos and
+#              on-delete-purge overridden under the custom keys (purge "true"
+#              means the golden carries NO deletion-policy annotation). Under
+#              the DEFAULT keys: a blacklist override that must not apply, a
+#              malformed sourceRepos value and a near-miss purge value that
+#              would FAIL this child if the default keys were read -- so a
+#              hardcoded default key here is not just a wrong golden, it is a
+#              child error the harness reports by name. One namespace labelled
+#              with the custom label (a destination), one labelled with the
+#              DEFAULT label (must not be).
+#   decoy      opted in under the DEFAULT annotation key only; must not be
+#              scaffolded at all.
+values:
+  argocd:
+    namespace: argo-cd
+    clusterResourceWhitelist:
+      - { group: "", kind: Namespace }
+    namespaceResourceBlacklist:
+      - { group: "", kind: ResourceQuota }
+  scaffolding:
+    mode: OnAnnotation
+    annotations:
+      enabled: gitops.acme.example/argocd
+  annotations:
+    sourceRepos: gitops.acme.example/source-repos
+    clusterResourceWhitelist: gitops.acme.example/cluster-resource-whitelist
+    namespaceResourceBlacklist: gitops.acme.example/namespace-resource-blacklist
+    onDeletePurge: gitops.acme.example/on-delete-purge
+  tenantNamespaceLabel: acme.example/team
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata:
+        name: custom
+        annotations:
+          gitops.acme.example/argocd: "true"
+          gitops.acme.example/cluster-resource-whitelist: '[{"group":"","kind":"PersistentVolume"}]'
+          gitops.acme.example/source-repos: '["https://git.acme.example/custom.git"]'
+          gitops.acme.example/on-delete-purge: "true"
+          # Decoys under the DEFAULT keys. All three must be ignored: the
+          # golden shows the chart-default blacklist, and the other two are
+          # values that would fail this child outright if the default keys
+          # were the ones being read.
+          argocd.tenantoperator.stakater.com/namespace-resource-blacklist: '[{"group":"","kind":"LimitRange"}]'
+          argocd.tenantoperator.stakater.com/source-repos: "{not json"
+          argocd.tenantoperator.stakater.com/on-delete-purge: "True"
+      spec:
+        accessControl:
+          owners: { groups: [custom-owners] }
+
+    - metadata:
+        name: decoy
+        annotations:
+          # Opted in under the DEFAULT scaffolding key only. Not scaffolded.
+          argocd.tenantoperator.stakater.com/enabled: "true"
+      spec:
+        accessControl:
+          owners: { groups: [decoy-owners] }
+
+  namespaces:
+    - metadata: { name: custom-dev, labels: { acme.example/team: custom } }
+    # Decoy: labelled with the DEFAULT tenant label. Must not be a destination.
+    - metadata: { name: custom-legacy, labels: { stakater.com/tenant: custom } }
