@@ -13,8 +13,6 @@ spec:
       server: https://kubernetes.default.svc
     - namespace: 12345-dev
       server: https://kubernetes.default.svc
-    - namespace: argo-cd
-      server: https://kubernetes.default.svc
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -24,21 +22,23 @@ spec:
       policies:
         - p, proj:12345:12345-owner, applications, *, 12345/*, allow
         - p, proj:12345:12345-owner, applicationsets, *, 12345/*, allow
-        - p, proj:12345:12345-owner, logs, *, 12345/*, allow
-        - p, proj:12345:12345-owner, exec, *, 12345/*, allow
+        - p, proj:12345:12345-owner, logs, get, 12345/*, allow
         - p, proj:12345:12345-owner, repositories, *, 12345/*, allow
-        - p, proj:12345:12345-owner, clusters, *, 12345/*, allow
+        - p, proj:12345:12345-owner, clusters, get, 12345/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - 12345-edit-group-010abb
       name: 12345-edit
       policies:
-        - p, proj:12345:12345-edit, applications, *, 12345/*, allow
-        - p, proj:12345:12345-edit, applicationsets, *, 12345/*, allow
-        - p, proj:12345:12345-edit, logs, *, 12345/*, allow
-        - p, proj:12345:12345-edit, exec, *, 12345/*, allow
-        - p, proj:12345:12345-edit, repositories, *, 12345/*, allow
-        - p, proj:12345:12345-edit, clusters, *, 12345/*, allow
+        - p, proj:12345:12345-edit, applications, get, 12345/*, allow
+        - p, proj:12345:12345-edit, applications, sync, 12345/*, allow
+        - p, proj:12345:12345-edit, applications, update, 12345/*, allow
+        - p, proj:12345:12345-edit, applications, update/*, 12345/*, allow
+        - p, proj:12345:12345-edit, applications, action/*, 12345/*, allow
+        - p, proj:12345:12345-edit, applicationsets, get, 12345/*, allow
+        - p, proj:12345:12345-edit, logs, get, 12345/*, allow
+        - p, proj:12345:12345-edit, repositories, get, 12345/*, allow
+        - p, proj:12345:12345-edit, clusters, get, 12345/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - 12345-view-group-519deb
@@ -47,6 +47,5 @@ spec:
         - p, proj:12345:12345-view, applications, get, 12345/*, allow
         - p, proj:12345:12345-view, applicationsets, get, 12345/*, allow
         - p, proj:12345:12345-view, logs, get, 12345/*, allow
-        - p, proj:12345:12345-view, exec, get, 12345/*, allow
         - p, proj:12345:12345-view, repositories, get, 12345/*, allow
         - p, proj:12345:12345-view, clusters, get, 12345/*, allow

@@ -96,29 +96,30 @@ func TestLiveObjectSemantics(t *testing.T) {
 		}
 	})
 
-	// The ArgoCD namespace is always a destination. The child
-	// gotemplate guards against adding it twice when it also carries the tenant
-	// label -- a duplicate destination is not fatal to ArgoCD, but it is a
-	// silent diff on every equivalence comparison.
-	t.Run("the ArgoCD namespace is listed once even when labelled for a tenant", func(t *testing.T) {
+	// #6: the ArgoCD namespace never becomes a destination, even when someone
+	// labels it for a tenant. The parent drops it, so namespacesJson never
+	// changes -- there is nothing to wait for on the label itself. A sentinel
+	// namespace labelled in the same breath proves the parent re-rendered
+	// after the label landed.
+	t.Run("the ArgoCD namespace is never a destination, even when labelled for a tenant", func(t *testing.T) {
+		const sentinel = "e2e-alpha-sentinel"
 		relabelNamespace(t, argoNS, tenant)
-		t.Cleanup(func() { relabelNamespace(t, argoNS, "") })
-
-		// Wait on what the PARENT saw, not on the destination list: the child
-		// deduplicates, so the list looks identical before and after and there
-		// would be nothing to wait for. namespacesJson is the parent's own
-		// output, and it changes the moment the label lands.
-		waitFor(t, "the parent to see the ArgoCD namespace as a tenant namespace", func() bool {
-			return strings.Contains(childParam(t, tenant, "namespacesJson"), fmt.Sprintf("%q", argoNS))
-		})
-		n := 0
-		for _, d := range destinationsOf(t, tenant) {
-			if d == argoNS {
-				n++
-			}
+		if err := applyNamespace(context.Background(), sentinel, tenant); err != nil {
+			t.Fatal(err)
 		}
-		if n != 1 {
-			t.Errorf("ArgoCD namespace appears %d times in destinations: %v", n, destinationsOf(t, tenant))
+		t.Cleanup(func() {
+			relabelNamespace(t, argoNS, "")
+			deleteNamespace(t, sentinel)
+		})
+
+		waitFor(t, "the parent to re-render with the sentinel namespace", func() bool {
+			return strings.Contains(childParam(t, tenant, "namespacesJson"), fmt.Sprintf("%q", sentinel))
+		})
+		if strings.Contains(childParam(t, tenant, "namespacesJson"), fmt.Sprintf("%q", argoNS)) {
+			t.Errorf("the parent passed the ArgoCD namespace to %s", tenant)
+		}
+		if contains(destinationsOf(t, tenant), argoNS) {
+			t.Errorf("ArgoCD namespace is a destination: %v", destinationsOf(t, tenant))
 		}
 	})
 

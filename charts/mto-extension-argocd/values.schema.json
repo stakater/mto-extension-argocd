@@ -60,6 +60,10 @@
           "required": [
             "pattern"
           ]
+        },
+        "allowControlPlaneDestination": {
+          "type": "boolean",
+          "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."
         }
       }
     },
@@ -212,6 +216,40 @@
             "namespace": {
               "type": "string",
               "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "leastPrivilege",
+            "extensionsCompatible"
+          ],
+          "description": "leastPrivilege (default, #7) or the legacy extensionsCompatible shape for migration."
+        },
+        "exec": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Grant owner exec create (web terminal as the argocd-server ServiceAccount). Default false."
+            }
+          }
+        },
+        "clusters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Grant owner clusters * (register project-scoped clusters). Default false."
             }
           }
         }

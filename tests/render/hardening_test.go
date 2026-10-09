@@ -355,8 +355,9 @@ func TestParentSurvivesEveryNamespaceShape(t *testing.T) {
 	}
 	sp, _ := docs[0]["spec"].(map[string]any)
 	dests := destinationNames(sp)
-	want := []string{"alpha-app", "argo-cd"}
-	if len(dests) != 2 || dests[0] != want[0] || dests[1] != want[1] {
+	// The ArgoCD namespace is not a destination by default (#6).
+	want := []string{"alpha-app"}
+	if len(dests) != 1 || dests[0] != want[0] {
 		t.Errorf("destinations = %v, want %v: an unlabelled namespace leaked in or the labelled one was lost", dests, want)
 	}
 }

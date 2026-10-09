@@ -11,8 +11,6 @@ spec:
   destinations:
     - namespace: opted-in-dev
       server: https://kubernetes.default.svc
-    - namespace: openshift-gitops
-      server: https://kubernetes.default.svc
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -21,21 +19,23 @@ spec:
       policies:
         - p, proj:opted-in:opted-in-owner, applications, *, opted-in/*, allow
         - p, proj:opted-in:opted-in-owner, applicationsets, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-owner, logs, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-owner, exec, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, logs, get, opted-in/*, allow
         - p, proj:opted-in:opted-in-owner, repositories, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-owner, clusters, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-owner, clusters, get, opted-in/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - opted-in-edit-group-b47aff
       name: opted-in-edit
       policies:
-        - p, proj:opted-in:opted-in-edit, applications, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-edit, applicationsets, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-edit, logs, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-edit, exec, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-edit, repositories, *, opted-in/*, allow
-        - p, proj:opted-in:opted-in-edit, clusters, *, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, sync, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, update, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, update/*, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applications, action/*, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, applicationsets, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, logs, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, repositories, get, opted-in/*, allow
+        - p, proj:opted-in:opted-in-edit, clusters, get, opted-in/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - opted-in-view-group-42c5c0
@@ -44,6 +44,5 @@ spec:
         - p, proj:opted-in:opted-in-view, applications, get, opted-in/*, allow
         - p, proj:opted-in:opted-in-view, applicationsets, get, opted-in/*, allow
         - p, proj:opted-in:opted-in-view, logs, get, opted-in/*, allow
-        - p, proj:opted-in:opted-in-view, exec, get, opted-in/*, allow
         - p, proj:opted-in:opted-in-view, repositories, get, opted-in/*, allow
         - p, proj:opted-in:opted-in-view, clusters, get, opted-in/*, allow

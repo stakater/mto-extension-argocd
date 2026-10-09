@@ -1,0 +1,43 @@
+# The compatibility values a migration from ExtensionsArgoCDReconciler starts
+# from: argocd.allowControlPlaneDestination and roles.profile
+# extensionsCompatible reproduce the legacy AppProject -- the ArgoCD namespace
+# appended to every tenant's destinations even when it matches a privileged
+# pattern (#6), and the six-line `*`/`get` roles with exec and cluster writes
+# (#7). UNSAFE; pinned so the migration target cannot drift.
+#
+#   legacy           The ArgoCD namespace belongs to another tenant's label:
+#                    still appended, as the old controller did.
+#   shares-argo-ns   ArgoCD namespace labelled for this tenant: listed once.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    allowControlPlaneDestination: true
+  roles:
+    profile: extensionsCompatible
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: ["^kube-.*"]
+        groups: []
+
+  tenants:
+    - metadata:
+        name: legacy
+      spec:
+        accessControl:
+          owners: { groups: [legacy-admins] }
+    - metadata:
+        name: shares-argo-ns
+      spec:
+        accessControl:
+          owners: { users: [ops@example.com] }
+
+  namespaces:
+    - metadata: { name: legacy-dev, labels: { stakater.com/tenant: legacy } }
+    - metadata: { name: shares-argo-ns-dev, labels: { stakater.com/tenant: shares-argo-ns } }
+    - metadata: { name: openshift-gitops, labels: { stakater.com/tenant: shares-argo-ns } }

@@ -120,6 +120,23 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 			wantErr: "not a valid Kubernetes label"},
 		// The override keys and the opt-in key share the Tenant annotation map;
 		// a duplicate makes the opt-in marker and an override read each other.
+		// An unrecognised profile must not fall back to either shape silently.
+		{name: "invalid roles.profile",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},
+			wantErr: "roles.profile must be one of leastPrivilege, extensionsCompatible"},
+		// A string "false" is truthy in a template: it would grant exec.
+		{name: "non-boolean roles.exec.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"roles.exec.enabled": `"false"`},
+			wantErr: "roles.exec.enabled must be true or false"},
+		{name: "non-boolean roles.clusters.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"roles.clusters.enabled": `"false"`},
+			wantErr: "roles.clusters.enabled must be true or false"},
+		{name: "non-boolean argocd.allowControlPlaneDestination",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.allowControlPlaneDestination": `"false"`},
+			wantErr: "argocd.allowControlPlaneDestination must be true or false"},
 		{name: "colliding annotation keys",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "annotations.onDeletePurge": "argocd.tenantoperator.stakater.com/enabled"},
 			wantErr: "annotation keys collide"},

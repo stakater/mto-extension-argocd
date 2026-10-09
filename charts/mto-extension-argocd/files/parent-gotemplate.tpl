@@ -37,6 +37,9 @@ filtering happens in exactly one place.
 {{- $aWl := .parameters.annotationClusterResourceWhitelist }}
 {{- $aBl := .parameters.annotationNamespaceResourceBlacklist }}
 {{- $aPurge := .parameters.annotationOnDeletePurge }}
+{{- /* #6. Off by default: the ArgoCD namespace is never a tenant destination,
+       even when it carries the tenant's label. On, it is the legacy shape. */ -}}
+{{- $allowCP := eq .parameters.allowControlPlaneDestination "true" }}
 {{- /*
 Read the IntegrationConfig shallowly and dig. The parameter resolves the whole
 .spec as a map; a deep jsonPath like .spec.accessControl.privileged fails the
@@ -113,7 +116,7 @@ instead of reaching the actionable failure below.
 {{- if $taken }}
 {{- range $ns := .parameters.namespaces }}
 {{- $owner := dig $nsLabel "" (default dict (index $ns.metadata "labels")) }}
-{{- if and $owner (hasKey $taken $owner) }}
+{{- if and $owner (hasKey $taken $owner) (or $allowCP (ne $ns.metadata.name $argoNs)) }}
 {{- $isPriv := false }}
 {{- /* mustRegexMatch, not regexMatch: the plain form discards the compile
        error, so a typo'd pattern in the cluster's IntegrationConfig silently
@@ -231,5 +234,7 @@ spec:
       value: {{ toJson $tu | quote }}
     - name: onDeletePurge
       value: {{ $purge | quote }}
+    - name: controlPlaneDestination
+      value: {{ ternary "true" "false" $allowCP | quote }}
 {{- end }}
 {{- end }}

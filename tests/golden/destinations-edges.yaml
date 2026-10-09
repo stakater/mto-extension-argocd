@@ -11,8 +11,6 @@ spec:
   destinations:
     - namespace: shares-argo-ns-dev
       server: https://kubernetes.default.svc
-    - namespace: openshift-gitops
-      server: https://kubernetes.default.svc
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -22,21 +20,23 @@ spec:
       policies:
         - p, proj:shares-argo-ns:shares-argo-ns-owner, applications, *, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-owner, applicationsets, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-owner, logs, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-owner, exec, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, logs, get, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-owner, repositories, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-owner, clusters, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, clusters, get, shares-argo-ns/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - shares-argo-ns-edit-group-a20c52
       name: shares-argo-ns-edit
       policies:
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, applicationsets, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, logs, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, exec, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, repositories, *, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-edit, clusters, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, sync, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, update, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, update/*, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, action/*, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applicationsets, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, logs, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, repositories, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, clusters, get, shares-argo-ns/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - shares-argo-ns-view-group-6a5bd7
@@ -45,7 +45,6 @@ spec:
         - p, proj:shares-argo-ns:shares-argo-ns-view, applications, get, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-view, applicationsets, get, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-view, logs, get, shares-argo-ns/*, allow
-        - p, proj:shares-argo-ns:shares-argo-ns-view, exec, get, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-view, repositories, get, shares-argo-ns/*, allow
         - p, proj:shares-argo-ns:shares-argo-ns-view, clusters, get, shares-argo-ns/*, allow
 ---
@@ -58,9 +57,7 @@ metadata:
   namespace: openshift-gitops
 spec:
   description: Managed by mto-extension-argocd
-  destinations:
-    - namespace: openshift-gitops
-      server: https://kubernetes.default.svc
+  destinations: []
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -70,21 +67,23 @@ spec:
       policies:
         - p, proj:no-namespaces:no-namespaces-owner, applications, *, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-owner, applicationsets, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-owner, logs, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-owner, exec, *, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-owner, logs, get, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-owner, repositories, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-owner, clusters, *, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-owner, clusters, get, no-namespaces/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - no-namespaces-edit-group-71c06d
       name: no-namespaces-edit
       policies:
-        - p, proj:no-namespaces:no-namespaces-edit, applications, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-edit, applicationsets, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-edit, logs, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-edit, exec, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-edit, repositories, *, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-edit, clusters, *, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applications, get, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applications, sync, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applications, update, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applications, update/*, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applications, action/*, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, applicationsets, get, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, logs, get, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, repositories, get, no-namespaces/*, allow
+        - p, proj:no-namespaces:no-namespaces-edit, clusters, get, no-namespaces/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - no-namespaces-view-group-bcdc56
@@ -93,6 +92,5 @@ spec:
         - p, proj:no-namespaces:no-namespaces-view, applications, get, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-view, applicationsets, get, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-view, logs, get, no-namespaces/*, allow
-        - p, proj:no-namespaces:no-namespaces-view, exec, get, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-view, repositories, get, no-namespaces/*, allow
         - p, proj:no-namespaces:no-namespaces-view, clusters, get, no-namespaces/*, allow
