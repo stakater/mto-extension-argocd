@@ -141,6 +141,17 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "invalid argocd.impersonation.serviceAccount",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.impersonation.serviceAccount": "*"},
 			wantErr: "argocd.impersonation.serviceAccount must be a ServiceAccount name"},
+		// #10. Without {{ tenant }} every tenant gets the same group:
+		// cross-tenant access. Without {{ tier }} viewers get the owner group.
+		{name: "invalid identity.mode",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.mode": "groups"},
+			wantErr: "identity.mode must be one of accessControl, groupPattern, both"},
+		{name: "identity.groupPattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.groupPattern": "argocd-{{ tier }}"},
+			wantErr: "identity.groupPattern must contain {{ tenant }}"},
+		{name: "identity.groupPattern without the tier",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.groupPattern": "tenant-{{ tenant }}"},
+			wantErr: "identity.groupPattern must contain {{ tier }}"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},

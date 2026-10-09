@@ -1,0 +1,30 @@
+# #10: groups named by pattern, matching the other Stakater extensions. In
+# groupPattern mode every role carries the generated group, the privileged
+# groups and tenant-<tenant>-<tier> -- and NOT the Tenant's accessControl
+# groups and users, which this tenant lists to prove they are dropped.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+  identity:
+    mode: groupPattern
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: [platform-admins]
+
+  tenants:
+    - metadata: { name: acme }
+      spec:
+        accessControl:
+          owners: { groups: [acme-admins], users: [alice@acme.example] }
+          editors: { groups: [acme-devs] }
+          viewers: { users: [bob@acme.example] }
+
+  namespaces:
+    - metadata: { name: acme-dev, labels: { stakater.com/tenant: acme } }

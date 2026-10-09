@@ -56,6 +56,12 @@ spec:
       value: {{ ((.Values.argocd).impersonation).enabled | default false | toString | quote }}
     - name: impersonationServiceAccount
       value: {{ ((.Values.argocd).impersonation).serviceAccount | default "argocd-deployer" | quote }}
+    {{- /* #10, chart-wide; validateIdentity on the parent has already refused
+           an unknown mode or a pattern missing either placeholder. */}}
+    - name: identityMode
+      value: {{ (.Values.identity).mode | default "accessControl" | quote }}
+    - name: identityGroupPattern
+      value: {{ (.Values.identity).groupPattern | default "tenant-{{ tenant }}-{{ tier }}" | quote }}
     - name: rolesProfile
       value: {{ (.Values.roles).profile | default "leastPrivilege" | quote }}
     - name: rolesExec

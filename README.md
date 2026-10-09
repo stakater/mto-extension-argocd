@@ -349,6 +349,30 @@ Also needed, outside this chart:
    impersonation enforces tenant boundaries at sync time, but the controller
    still holds cluster-admin.
 
+## Groups named by pattern
+
+By default (`identity.mode: accessControl`) each role's groups are the
+Tenant's owners, editors and viewers, as the old controller rendered them. The
+other Stakater extensions take access from identity-provider groups named by
+pattern instead, and so can this chart (#10):
+
+```yaml
+identity:
+  mode: groupPattern                            # or both, while moving over
+  groupPattern: "tenant-{{ tenant }}-{{ tier }}" # the default
+```
+
+Tenant `acme` then gets `tenant-acme-owners`, `tenant-acme-editors` and
+`tenant-acme-viewers`. The MTO-generated group and the privileged groups are
+kept in every mode. `both` appends the pattern group to the Tenant's lists.
+
+It matters most on OpenShift with external OIDC (4.20+), where the
+MTO-generated OpenShift group never reaches ArgoCD, and wherever user entries
+would otherwise need `scopes: [groups, email]`. The pattern must contain both
+placeholders. Use a prefix your identity provider controls, and never a name a
+local ArgoCD user has: an SSO group named like a local user inherits that
+user's roles.
+
 ## Before production
 
 Four ways to end up with something that looks correct and isn't.
