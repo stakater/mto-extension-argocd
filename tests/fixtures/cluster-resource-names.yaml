@@ -1,0 +1,50 @@
+# #13: ArgoCD 3.3+ can restrict a cluster-scoped kind by object name (globs).
+# The whitelist keeps `name` when present; without it the entry is unchanged.
+#
+#   scoped     the chart default: Namespaces named after the tenant only, plus
+#              an unrestricted ClusterRole entry (no name).
+#   annotated  its own whitelist with a name, through the annotation.
+#   bad-type   a non-string name: fails this tenant only.
+#   blacklist  a name on a namespaceResourceBlacklist entry: refused, because
+#              only the cluster-scoped lists take names.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    clusterResourceWhitelist:
+      - { group: "", kind: Namespace, name: "{{ tenant }}-*" }
+      - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+  scaffolding:
+    mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-bad-type: "name must be a string"
+  mto-argocd-tenant-blacklist: "name is only supported on clusterResourceWhitelist"
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata: { name: scoped }
+      spec: {}
+    - metadata:
+        name: annotated
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: '[{"group":"","kind":"Namespace","name":"annotated-*"}]'
+      spec: {}
+    - metadata:
+        name: bad-type
+        annotations:
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: '[{"group":"","kind":"Namespace","name":7}]'
+      spec: {}
+    - metadata:
+        name: blacklist
+        annotations:
+          argocd.tenantoperator.stakater.com/namespace-resource-blacklist: '[{"group":"","kind":"Secret","name":"x"}]'
+      spec: {}
+
+  namespaces: []

@@ -38,7 +38,7 @@
           "description": "REQUIRED. Namespace ArgoCD runs in. A blank value does not render zero children -- it renders one per tenant, each emitting an AppProject with an empty namespace that the API server rejects, so every tenant breaks at once. This minLength is the guard."
         },
         "clusterResourceWhitelist": {
-          "$ref": "#/definitions/groupKindList"
+          "$ref": "#/definitions/groupKindNameList"
         },
         "namespaceResourceBlacklist": {
           "$ref": "#/definitions/groupKindList"
@@ -401,6 +401,31 @@
           "kind": {
             "type": "string",
             "minLength": 1
+          }
+        }
+      }
+    },
+    "groupKindNameList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group",
+          "kind"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ArgoCD 3.3+: restrict by object name (globs); {{ tenant }} is expanded."
           }
         }
       }

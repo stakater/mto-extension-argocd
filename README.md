@@ -171,7 +171,7 @@ Full reference with rationale in
 | `argocd.namespace` | — | **Required.** Where AppProjects are created |
 | `scaffolding.mode` | `OnAnnotation` | `Always`, `OnLabel`, `OnAnnotation`, `Never` |
 | `argocd.sourceRepos.pattern` | `[]` | Per-tenant repo patterns, one sourceRepos entry each; `{{ tenant }}` is expanded |
-| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage |
+| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage; with ArgoCD 3.3+ an entry may add `name` (globs, `{{ tenant }}` expanded), e.g. `{group: "", kind: Namespace, name: "{{ tenant }}-*"}` |
 | `argocd.namespaceResourceBlacklist` | `[]` | Namespaced kinds they may not |
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |

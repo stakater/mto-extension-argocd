@@ -47,6 +47,13 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
        group and kind are read with `index`, not as fields: from v0.0.8
        template-operator-v2 renders with missingkey=error, and a field read of
        an absent key would fail the child instead of rendering the core group. */ -}}
+{{- /* #13: `name` (ArgoCD 3.3+) on whitelist entries only, a string when present. */ -}}
+{{- range $i := $bl }}
+{{- if hasKey $i "name" }}{{- fail "a name is only supported on clusterResourceWhitelist entries, not namespaceResourceBlacklist" }}{{- end }}
+{{- end }}
+{{- range $i := $wl }}
+{{- if and (hasKey $i "name") (not (kindIs "string" (index $i "name"))) }}{{- fail (printf "clusterResourceWhitelist name must be a string, got %s (%v)" (kindOf (index $i "name")) (index $i "name")) }}{{- end }}
+{{- end }}
 {{- range $i := concat $wl $bl }}
 {{- if and (hasKey $i "group") (not (kindIs "string" (index $i "group"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf (index $i "group")) (index $i "group")) }}{{- end }}
 {{- if and (hasKey $i "kind") (not (kindIs "string" (index $i "kind"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf (index $i "kind")) (index $i "kind")) }}{{- end }}
@@ -197,6 +204,9 @@ spec:
   {{- range $i := $wl }}
     - group: {{ (index $i "group") | quote }}
       kind: {{ (index $i "kind") | quote }}
+      {{- if hasKey $i "name" }}
+      name: {{ index $i "name" | replace "{{tenant}}" $t | replace "{{ tenant }}" $t | quote }}
+      {{- end }}
   {{- end }}
   {{- end }}
   {{- if $bl }}

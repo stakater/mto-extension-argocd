@@ -1,0 +1,102 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: scoped
+  namespace: openshift-gitops
+spec:
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+      name: scoped-*
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+  description: Managed by mto-extension-argocd
+  destinations: []
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - scoped-owner-group-25aa2d
+      name: scoped-owner
+      policies:
+        - p, proj:scoped:scoped-owner, applications, *, scoped/*, allow
+        - p, proj:scoped:scoped-owner, applicationsets, *, scoped/*, allow
+        - p, proj:scoped:scoped-owner, logs, get, scoped/*, allow
+        - p, proj:scoped:scoped-owner, repositories, *, scoped/*, allow
+        - p, proj:scoped:scoped-owner, clusters, get, scoped/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - scoped-edit-group-0f4e3b
+      name: scoped-edit
+      policies:
+        - p, proj:scoped:scoped-edit, applications, get, scoped/*, allow
+        - p, proj:scoped:scoped-edit, applications, sync, scoped/*, allow
+        - p, proj:scoped:scoped-edit, applications, update, scoped/*, allow
+        - p, proj:scoped:scoped-edit, applications, update/*, scoped/*, allow
+        - p, proj:scoped:scoped-edit, applications, action/*, scoped/*, allow
+        - p, proj:scoped:scoped-edit, applicationsets, get, scoped/*, allow
+        - p, proj:scoped:scoped-edit, logs, get, scoped/*, allow
+        - p, proj:scoped:scoped-edit, repositories, get, scoped/*, allow
+        - p, proj:scoped:scoped-edit, clusters, get, scoped/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - scoped-view-group-9111d8
+      name: scoped-view
+      policies:
+        - p, proj:scoped:scoped-view, applications, get, scoped/*, allow
+        - p, proj:scoped:scoped-view, applicationsets, get, scoped/*, allow
+        - p, proj:scoped:scoped-view, logs, get, scoped/*, allow
+        - p, proj:scoped:scoped-view, repositories, get, scoped/*, allow
+        - p, proj:scoped:scoped-view, clusters, get, scoped/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: annotated
+  namespace: openshift-gitops
+spec:
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+      name: annotated-*
+  description: Managed by mto-extension-argocd
+  destinations: []
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - annotated-owner-group-8a5966
+      name: annotated-owner
+      policies:
+        - p, proj:annotated:annotated-owner, applications, *, annotated/*, allow
+        - p, proj:annotated:annotated-owner, applicationsets, *, annotated/*, allow
+        - p, proj:annotated:annotated-owner, logs, get, annotated/*, allow
+        - p, proj:annotated:annotated-owner, repositories, *, annotated/*, allow
+        - p, proj:annotated:annotated-owner, clusters, get, annotated/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - annotated-edit-group-419754
+      name: annotated-edit
+      policies:
+        - p, proj:annotated:annotated-edit, applications, get, annotated/*, allow
+        - p, proj:annotated:annotated-edit, applications, sync, annotated/*, allow
+        - p, proj:annotated:annotated-edit, applications, update, annotated/*, allow
+        - p, proj:annotated:annotated-edit, applications, update/*, annotated/*, allow
+        - p, proj:annotated:annotated-edit, applications, action/*, annotated/*, allow
+        - p, proj:annotated:annotated-edit, applicationsets, get, annotated/*, allow
+        - p, proj:annotated:annotated-edit, logs, get, annotated/*, allow
+        - p, proj:annotated:annotated-edit, repositories, get, annotated/*, allow
+        - p, proj:annotated:annotated-edit, clusters, get, annotated/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - annotated-view-group-dc3829
+      name: annotated-view
+      policies:
+        - p, proj:annotated:annotated-view, applications, get, annotated/*, allow
+        - p, proj:annotated:annotated-view, applicationsets, get, annotated/*, allow
+        - p, proj:annotated:annotated-view, logs, get, annotated/*, allow
+        - p, proj:annotated:annotated-view, repositories, get, annotated/*, allow
+        - p, proj:annotated:annotated-view, clusters, get, annotated/*, allow
