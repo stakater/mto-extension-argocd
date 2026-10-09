@@ -64,6 +64,21 @@
         "allowControlPlaneDestination": {
           "type": "boolean",
           "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."
+        },
+        "sourceNamespaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Add sourceNamespaces: [<pattern>] to every AppProject (#9). Default false."
+            },
+            "pattern": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The tenant's Application namespace; {{ tenant }} is expanded. Default {{ tenant }}-argocd."
+            }
+          }
         }
       }
     },

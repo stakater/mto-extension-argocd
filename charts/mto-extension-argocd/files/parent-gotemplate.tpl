@@ -40,6 +40,8 @@ filtering happens in exactly one place.
 {{- /* #6. Off by default: the ArgoCD namespace is never a tenant destination,
        even when it carries the tenant's label. On, it is the legacy shape. */ -}}
 {{- $allowCP := eq .parameters.allowControlPlaneDestination "true" }}
+{{- $snOn := eq .parameters.sourceNamespacesEnabled "true" }}
+{{- $snPattern := .parameters.sourceNamespacesPattern }}
 {{- /*
 Read the IntegrationConfig shallowly and dig. The parameter resolves the whole
 .spec as a map; a deep jsonPath like .spec.accessControl.privileged fails the
@@ -236,5 +238,20 @@ spec:
       value: {{ $purge | quote }}
     - name: controlPlaneDestination
       value: {{ ternary "true" "false" $allowCP | quote }}
+{{- /* #9. The tenant's Application namespace, checked here because only the
+       parent sees the privileged patterns. A refusal is passed down, not
+       acted on: the child fails, so one tenant breaks, not the fleet. */ -}}
+{{- $sns := list }}
+{{- $snRefused := list }}
+{{- if $snOn }}
+{{- $sn := replace "{{tenant}}" $name (replace "{{ tenant }}" $name $snPattern) }}
+{{- if eq $sn $argoNs }}{{- $snRefused = append $snRefused (printf "source namespace %q is the ArgoCD namespace: an Application there may reference any AppProject" $sn) }}{{- end }}
+{{- range $p := $privNs }}{{- if mustRegexMatch $p $sn }}{{- $snRefused = append $snRefused (printf "source namespace %q matches privileged pattern %q" $sn $p) }}{{- end }}{{- end }}
+{{- $sns = list $sn }}
+{{- end }}
+    - name: sourceNamespacesJson
+      value: {{ toJson $sns | quote }}
+    - name: sourceNamespacesRefusedJson
+      value: {{ toJson $snRefused | quote }}
 {{- end }}
 {{- end }}

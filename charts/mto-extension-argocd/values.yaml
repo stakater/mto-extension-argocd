@@ -54,6 +54,25 @@ argocd:
   # Applications out of the control plane (sourceNamespaces) and set it back.
   allowControlPlaneDestination: false
 
+  # Applications in the tenant's own namespace (#9). When enabled, every
+  # AppProject gets sourceNamespaces: [<pattern>], so the tenant creates its
+  # Applications and ApplicationSets there instead of in the control plane.
+  #
+  # Two gates, and this is only the second: ArgoCD must also watch the
+  # namespace -- `application.namespaces` in argocd-cmd-params-cm (upstream) or
+  # ArgoCD.spec.sourceNamespaces (OpenShift GitOps 1.13+). See README,
+  # "Applications in the tenant's own namespace".
+  #
+  # A dedicated namespace, not every tenant namespace: on OpenShift GitOps a
+  # namespace cannot be both managed-by and a source namespace without custom
+  # roles. The namespace itself comes from the Multi-Tenant Operator (for
+  # example namespaces.withTenantPrefix: [argocd]); this chart only writes the
+  # AppProject. A pattern that expands to the ArgoCD namespace or to a
+  # privileged namespace fails that tenant.
+  sourceNamespaces:
+    enabled: false
+    pattern: "{{ tenant }}-argocd"
+
   # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
   # a Tenant may override it with the cluster-resource-whitelist annotation.
   # Empty here and absent on the Tenant means the field is omitted from the

@@ -1,0 +1,43 @@
+# #9: Applications in the tenant's own namespace. With
+# argocd.sourceNamespaces.enabled, each AppProject gets
+# sourceNamespaces: [<pattern expanded>], default "{{ tenant }}-argocd".
+#
+#   acme   gets sourceNamespaces: [acme-argocd].
+#   kube   expands to kube-argocd, which matches the privileged ^kube-.*:
+#          refused, this tenant only. A privileged namespace is the platform's.
+#   ops    expands to ops-argocd, which IS the ArgoCD namespace: refused. An
+#          Application in the control-plane namespace may reference any
+#          AppProject, so it can never be a tenant's source namespace.
+
+values:
+  argocd:
+    namespace: ops-argocd
+    sourceNamespaces:
+      enabled: true
+  scaffolding:
+    mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-kube: "privileged"
+  mto-argocd-tenant-ops: "ArgoCD namespace"
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: ["^kube-.*"]
+        groups: []
+
+  tenants:
+    - metadata: { name: acme }
+      spec:
+        accessControl:
+          owners: { groups: [acme-admins] }
+    - metadata: { name: kube }
+      spec: {}
+    - metadata: { name: ops }
+      spec: {}
+
+  namespaces:
+    - metadata: { name: acme-dev, labels: { stakater.com/tenant: acme } }
+    - metadata: { name: acme-argocd, labels: { stakater.com/tenant: acme } }

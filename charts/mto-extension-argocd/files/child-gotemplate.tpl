@@ -81,6 +81,8 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- fail (printf "rolesProfile must be leastPrivilege or extensionsCompatible, got %q" .parameters.rolesProfile) }}
 {{- end }}
 {{- $cp := eq .parameters.controlPlaneDestination "true" }}
+{{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
+{{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
 {{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
 {{- $exec := eq .parameters.rolesExec "true" }}
 {{- $clusters := eq .parameters.rolesClusters "true" }}
@@ -112,6 +114,12 @@ spec:
          matches a privileged pattern, and guarded against listing it twice
          when the parent already put it in namespacesJson (labelled for this
          tenant and not privileged). */}}
+  {{- if $sns }}
+  sourceNamespaces:
+  {{- range $s := $sns }}
+    - {{ $s | quote }}
+  {{- end }}
+  {{- end }}
   {{- $dests := $nsList }}
   {{- if and $cp (not (has $argoNs $nsList)) }}{{- $dests = append $nsList $argoNs }}{{- end }}
   {{- if $dests }}

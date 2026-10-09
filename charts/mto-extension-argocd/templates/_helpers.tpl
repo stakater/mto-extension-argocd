@@ -199,6 +199,23 @@ and a template reads the string "false" as true -- which would grant exec,
 cluster writes or the control-plane destination. An unknown profile must not
 fall back to either role shape silently.
 */ -}}
+{{- define "mto-extension-argocd.validateSourceNamespaces" -}}
+{{- $sn := (.Values.argocd).sourceNamespaces | default dict -}}
+{{- if and (hasKey $sn "enabled") (not (kindIs "invalid" $sn.enabled)) (not (kindIs "bool" $sn.enabled)) -}}
+{{- fail (printf "argocd.sourceNamespaces.enabled must be true or false (a boolean), got %s %v" (kindOf $sn.enabled) $sn.enabled) -}}
+{{- end -}}
+{{- $p := $sn.pattern | default "{{ tenant }}-argocd" -}}
+{{- if and (hasKey $sn "pattern") (or (not (kindIs "string" $sn.pattern)) (eq $sn.pattern "")) -}}
+{{- fail "argocd.sourceNamespaces.pattern must be a non-empty string; {{ tenant }} is expanded to the tenant's name" -}}
+{{- end -}}
+{{- $expanded := replace "{{tenant}}" "x" (replace "{{ tenant }}" "x" $p) -}}
+{{- range $residue := list "{{" "${" "$(" "%s" -}}
+{{- if contains $residue $expanded -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mto-extension-argocd.validateSecurityValues" -}}
 {{- $roles := .Values.roles | default dict -}}
 {{- $profile := $roles.profile | default "leastPrivilege" | toString -}}
