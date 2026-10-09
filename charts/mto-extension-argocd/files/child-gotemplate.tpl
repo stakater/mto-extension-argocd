@@ -72,7 +72,7 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $purge := eq .parameters.onDeletePurge "true" }}
 {{- /* Chart-wide and parent-set values; each must be exactly what the chart
        renders. A near-miss fails this child rather than silently granting. */ -}}
-{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" }}
+{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" }}
 {{- if not (has (index $.parameters $p) (list "true" "false")) }}
 {{- fail (printf "%s must be exactly \"true\" or \"false\", got %q" $p (index $.parameters $p)) }}
 {{- end }}
@@ -81,6 +81,7 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- fail (printf "rolesProfile must be leastPrivilege or extensionsCompatible, got %q" .parameters.rolesProfile) }}
 {{- end }}
 {{- $cp := eq .parameters.controlPlaneDestination "true" }}
+{{- $impersonate := eq .parameters.impersonation "true" }}
 {{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
 {{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
 {{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
@@ -130,6 +131,18 @@ spec:
   {{- end }}
   {{- else }}
   destinations: []
+  {{- end }}
+  {{- /* #15. One entry per tenant namespace -- $nsList, not $dests, so the
+         ArgoCD namespace never gets one even when it is a destination: there
+         is no tenant deployer in it. No catch-all: an unmatched destination
+         must fail the sync rather than fall back to the controller. */}}
+  {{- if and $impersonate $nsList }}
+  destinationServiceAccounts:
+  {{- range $ns := $nsList }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ $ns | quote }}
+      defaultServiceAccount: {{ $.parameters.impersonationServiceAccount | quote }}
+  {{- end }}
   {{- end }}
   {{- if $wl }}
   clusterResourceWhitelist:

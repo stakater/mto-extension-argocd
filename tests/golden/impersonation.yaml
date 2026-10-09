@@ -1,0 +1,108 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: acme
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinationServiceAccounts:
+    - defaultServiceAccount: argocd-deployer
+      namespace: acme-dev
+      server: https://kubernetes.default.svc
+    - defaultServiceAccount: argocd-deployer
+      namespace: acme-prod
+      server: https://kubernetes.default.svc
+  destinations:
+    - namespace: acme-dev
+      server: https://kubernetes.default.svc
+    - namespace: acme-prod
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-owner-group-c2ef09
+        - acme-admins
+      name: acme-owner
+      policies:
+        - p, proj:acme:acme-owner, applications, *, acme/*, allow
+        - p, proj:acme:acme-owner, applicationsets, *, acme/*, allow
+        - p, proj:acme:acme-owner, logs, get, acme/*, allow
+        - p, proj:acme:acme-owner, repositories, *, acme/*, allow
+        - p, proj:acme:acme-owner, clusters, get, acme/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-edit-group-3d68e6
+      name: acme-edit
+      policies:
+        - p, proj:acme:acme-edit, applications, get, acme/*, allow
+        - p, proj:acme:acme-edit, applications, sync, acme/*, allow
+        - p, proj:acme:acme-edit, applications, update, acme/*, allow
+        - p, proj:acme:acme-edit, applications, update/*, acme/*, allow
+        - p, proj:acme:acme-edit, applications, action/*, acme/*, allow
+        - p, proj:acme:acme-edit, applicationsets, get, acme/*, allow
+        - p, proj:acme:acme-edit, logs, get, acme/*, allow
+        - p, proj:acme:acme-edit, repositories, get, acme/*, allow
+        - p, proj:acme:acme-edit, clusters, get, acme/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-view-group-8ee042
+      name: acme-view
+      policies:
+        - p, proj:acme:acme-view, applications, get, acme/*, allow
+        - p, proj:acme:acme-view, applicationsets, get, acme/*, allow
+        - p, proj:acme:acme-view, logs, get, acme/*, allow
+        - p, proj:acme:acme-view, repositories, get, acme/*, allow
+        - p, proj:acme:acme-view, clusters, get, acme/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: no-ns
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-ns-owner-group-21b655
+      name: no-ns-owner
+      policies:
+        - p, proj:no-ns:no-ns-owner, applications, *, no-ns/*, allow
+        - p, proj:no-ns:no-ns-owner, applicationsets, *, no-ns/*, allow
+        - p, proj:no-ns:no-ns-owner, logs, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-owner, repositories, *, no-ns/*, allow
+        - p, proj:no-ns:no-ns-owner, clusters, get, no-ns/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-ns-edit-group-00477c
+      name: no-ns-edit
+      policies:
+        - p, proj:no-ns:no-ns-edit, applications, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, applications, sync, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, applications, update, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, applications, update/*, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, applications, action/*, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, applicationsets, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, logs, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, repositories, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-edit, clusters, get, no-ns/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - no-ns-view-group-5056b7
+      name: no-ns-view
+      policies:
+        - p, proj:no-ns:no-ns-view, applications, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-view, applicationsets, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-view, logs, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-view, repositories, get, no-ns/*, allow
+        - p, proj:no-ns:no-ns-view, clusters, get, no-ns/*, allow

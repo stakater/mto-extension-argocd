@@ -73,6 +73,20 @@ argocd:
     enabled: false
     pattern: "{{ tenant }}-argocd"
 
+  # Sync impersonation (#15). When enabled, every AppProject maps each tenant
+  # namespace to `serviceAccount` IN that namespace, so ArgoCD syncs as that
+  # account instead of its own cluster-admin controller. One entry per tenant
+  # namespace and no catch-all: an unmatched destination fails the sync.
+  #
+  # Needs ArgoCD 3.5+ (beta; alpha before) with
+  # application.sync.impersonation.enabled: "true" in argocd-cm, and the
+  # ServiceAccount in every tenant namespace -- a Multi-Tenant Operator
+  # template, see README. Real damage limitation also needs the application
+  # controller's own ClusterRole reduced.
+  impersonation:
+    enabled: false
+    serviceAccount: argocd-deployer
+
   # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
   # a Tenant may override it with the cluster-resource-whitelist annotation.
   # Empty here and absent on the Tenant means the field is omitted from the

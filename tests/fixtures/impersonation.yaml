@@ -1,0 +1,37 @@
+# #15: sync impersonation. With argocd.impersonation.enabled, each AppProject
+# gets one destinationServiceAccounts entry per tenant namespace, mapping it to
+# the ServiceAccount argocd-deployer IN that namespace. No catch-all entry: an
+# unmatched destination fails the sync, which is the point.
+#
+#   acme       two namespaces, two entries. The control-plane opt-in is on here
+#              to prove the ArgoCD namespace never gets an entry even when it
+#              is a destination: there is no tenant deployer in it.
+#   no-ns      no namespaces, so no entries and the field is omitted.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    allowControlPlaneDestination: true
+    impersonation:
+      enabled: true
+  scaffolding:
+    mode: Always
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata: { name: acme }
+      spec:
+        accessControl:
+          owners: { groups: [acme-admins] }
+    - metadata: { name: no-ns }
+      spec: {}
+
+  namespaces:
+    - metadata: { name: acme-dev, labels: { stakater.com/tenant: acme } }
+    - metadata: { name: acme-prod, labels: { stakater.com/tenant: acme } }

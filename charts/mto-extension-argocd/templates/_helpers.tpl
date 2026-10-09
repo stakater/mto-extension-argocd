@@ -216,6 +216,17 @@ fall back to either role shape silently.
 {{- end -}}
 {{- end -}}
 
+{{- define "mto-extension-argocd.validateImpersonation" -}}
+{{- $im := (.Values.argocd).impersonation | default dict -}}
+{{- if and (hasKey $im "enabled") (not (kindIs "invalid" $im.enabled)) (not (kindIs "bool" $im.enabled)) -}}
+{{- fail (printf "argocd.impersonation.enabled must be true or false (a boolean), got %s %v" (kindOf $im.enabled) $im.enabled) -}}
+{{- end -}}
+{{- $sa := $im.serviceAccount | default "argocd-deployer" | toString -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" $sa) -}}
+{{- fail (printf "argocd.impersonation.serviceAccount must be a ServiceAccount name (lowercase DNS subdomain), got %q; a glob would act as a catch-all" $sa) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mto-extension-argocd.validateSecurityValues" -}}
 {{- $roles := .Values.roles | default dict -}}
 {{- $profile := $roles.profile | default "leastPrivilege" | toString -}}

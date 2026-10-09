@@ -50,6 +50,12 @@ spec:
       value: "[]"
     {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
            has already refused anything else. */}}
+    {{- /* #15, chart-wide; validateImpersonation on the parent has already
+           refused a non-boolean or a non-name. */}}
+    - name: impersonation
+      value: {{ ((.Values.argocd).impersonation).enabled | default false | toString | quote }}
+    - name: impersonationServiceAccount
+      value: {{ ((.Values.argocd).impersonation).serviceAccount | default "argocd-deployer" | quote }}
     - name: rolesProfile
       value: {{ (.Values.roles).profile | default "leastPrivilege" | quote }}
     - name: rolesExec
