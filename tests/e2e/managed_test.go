@@ -110,7 +110,8 @@ func TestManagedFleet(t *testing.T) {
 		// The other tenant must not have moved. Its child is rendered from the
 		// same namespace list, so a filter that ignored the label would show up
 		// here and nowhere else.
-		if got := destinationsOf(t, fixtureTenantEmpty); len(got) != 1 {
+		// It has no namespaces, so no destinations at all (#6).
+		if got := destinationsOf(t, fixtureTenantEmpty); len(got) != 0 {
 			t.Errorf("unrelated tenant's destinations changed: %v", got)
 		}
 
