@@ -7,8 +7,8 @@
 #     -n multi-tenant-operator -f examples/values-production.yaml
 
 argocd:
-  # REQUIRED. Where ArgoCD runs; every AppProject is created here and it is
-  # always a destination.
+  # REQUIRED. Where ArgoCD runs; every AppProject is created here. It is never
+  # a tenant destination (#6).
   namespace: openshift-gitops
 
   sourceRepos:
@@ -38,9 +38,18 @@ argocd:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
+  #
+  # The blacklist below is the recommended baseline (#11): kinds the
+  # Multi-Tenant Operator already owns in tenant namespaces. Let an Application
+  # carry one and ArgoCD and MTO overwrite each other on every sync. Add
+  # rbac.authorization.k8s.io RoleBinding too if MTO renders the tenant's
+  # RoleBindings and tenants should not add their own. Not a chart default: a
+  # default would add the field to every existing AppProject.
   namespaceResourceBlacklist:
     - group: ""
       kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
 
 scaffolding:
   # Nothing is scaffolded until a Tenant is annotated. Prefer this to Always:

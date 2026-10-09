@@ -80,8 +80,20 @@ it is kept or deleted depends on your template-operator-v2 version, see
 |---|---|
 | [multi-tenant-operator][mto] | `Tenant` v1beta3 and `IntegrationConfig` v1beta1 |
 | [template-operator-v2][tov2] | v0.0.5 or later. `sync.mode: strict`, the default, needs the sync webhook (v0.0.3 or later; v0.0.6 or later on OpenShift without cert-manager). `onDeletePurgeAppProject: false`, the default, retains AppProjects only on v0.0.7 or later — on v0.0.6 and earlier they are deleted, see [What deletes an AppProject](#what-deletes-an-appproject) |
-| ArgoCD | `argoproj.io/v1alpha1` `AppProject` |
+| ArgoCD | `argoproj.io/v1alpha1` `AppProject`; 3.x, tested on 3.5.4. See [ArgoCD versions](#argocd-versions) |
 | Kubernetes | 1.33+ tested. tov2's CRDs do not install on 1.31 |
+
+### ArgoCD versions
+
+Upstream supports the last three minors (3.5, 3.4, 3.3 as of October 2026).
+OpenShift GitOps 1.22 ships ArgoCD 3.5.3, 1.21 ships 3.4.3, 1.20 ships 3.3.2.
+
+| Feature | Needs |
+|---|---|
+| this chart, security defaults included | ArgoCD 3.0+ |
+| Applications in the tenant's own namespace | ArgoCD 3.x; OpenShift GitOps 1.13+. 3-segment policies (`<project>/<namespace>/<app>`) need 3.4.4+ — OpenShift GitOps 1.21.0 (3.4.3) lacks that fix |
+| `name` on `clusterResourceWhitelist` entries | ArgoCD 3.3+ |
+| sync impersonation (beta), ApplicationSets in any namespace (stable) | ArgoCD 3.5+; OpenShift GitOps 1.22 |
 
 ## Quick start
 
@@ -290,6 +302,30 @@ both `managed-by` an instance and a source namespace without custom roles.
 The tenant's existing `<tenant>/*` role policies already cover Applications
 there; 3-segment policies (`<project>/<namespace>/<app>`) need ArgoCD 3.4.4 or
 later.
+
+## ApplicationSets in tenant namespaces
+
+The roles already grant `applicationsets`, and with
+[source namespaces](#applications-in-the-tenants-own-namespace) tenants can
+create ApplicationSets in their own namespace too (#14). ApplicationSets in any
+namespace are stable in ArgoCD 3.5 and GA in OpenShift GitOps 1.22; generated
+Applications land in the ApplicationSet's namespace.
+
+They carry risks only platform settings can close
+([ArgoCD docs](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Appset-Any-Namespace/)):
+
+| Setting (`argocd-cmd-params-cm`) | Why |
+|---|---|
+| `applicationsetcontroller.namespaces: "*-argocd"` | the controller only reads ApplicationSets there; keep it equal to the source namespaces |
+| `applicationsetcontroller.allowed.scm.providers` | SCM-provider and pull-request generators can reach arbitrary hosts with the tenant's tokens; allow only yours |
+| `applicationsetcontroller.enable.scm.providers: "false"` | if tenants don't need those generators at all |
+| `applicationsetcontroller.enable.tokenref.strict.mode: "true"` | a generator may only use token Secrets labelled for ApplicationSets |
+
+On OpenShift GitOps 1.22 the same lives in the `ArgoCD` resource:
+`spec.applicationSet.sourceNamespaces` and `spec.applicationSet.scmProviders`.
+Two more things to know: a `clusters: {}` generator discovers every cluster
+ArgoCD knows, and an ApplicationSet whose template sets `project` from a
+parameter cannot use project-scoped repositories.
 
 ## Sync impersonation
 
