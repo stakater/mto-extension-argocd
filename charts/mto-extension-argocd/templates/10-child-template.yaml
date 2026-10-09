@@ -44,6 +44,11 @@ spec:
       value: "false"
     {{- /* #9, set per child by the parent. JSON lists, never "" -- an empty
            string is an unset parameter to template-operator-v2. */}}
+    {{- /* #12, set per child by the parent. */}}
+    - name: syncWindowsJson
+      value: "[]"
+    - name: orphanedResources
+      value: "off"
     - name: sourceNamespacesJson
       value: "[]"
     - name: sourceNamespacesRefusedJson

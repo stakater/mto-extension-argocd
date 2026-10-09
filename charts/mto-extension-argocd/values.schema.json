@@ -95,6 +95,73 @@
               "description": "ServiceAccount in each tenant namespace that syncs run as. Default argocd-deployer."
             }
           }
+        },
+        "syncWindows": {
+          "type": "array",
+          "description": "Sync windows on every AppProject (#12).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "schedule",
+              "duration"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ]
+              },
+              "schedule": {
+                "type": "string",
+                "minLength": 1
+              },
+              "duration": {
+                "type": "string",
+                "minLength": 1
+              },
+              "applications": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "namespaces": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "clusters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "manualSync": {
+                "type": "boolean"
+              },
+              "timeZone": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "orphanedResources": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "monitor"
+          ],
+          "description": "Orphaned-resource monitoring (#12). Default off."
         }
       }
     },
@@ -151,7 +218,9 @@
         "sourceRepos",
         "clusterResourceWhitelist",
         "namespaceResourceBlacklist",
-        "onDeletePurge"
+        "onDeletePurge",
+        "syncWindows",
+        "orphanedResources"
       ],
       "properties": {
         "sourceRepos": {
@@ -167,6 +236,14 @@
           "minLength": 1
         },
         "onDeletePurge": {
+          "type": "string",
+          "minLength": 1
+        },
+        "syncWindows": {
+          "type": "string",
+          "minLength": 1
+        },
+        "orphanedResources": {
           "type": "string",
           "minLength": 1
         }

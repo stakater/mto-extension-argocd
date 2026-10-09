@@ -1,0 +1,60 @@
+# #12: per-tenant sync windows and orphaned-resource monitoring, with the same
+# override rules as every other per-tenant setting.
+#
+#   inherits       no annotation: the chart's deny window and `warn`.
+#   overrides      its own allow window and `monitor` (no warnings).
+#   empty          an explicit [] and `off`: no windows, no monitoring.
+#   bad-window     kind "maybe": fails this tenant only.
+#   bad-orphaned   "yes" is not off/warn/monitor: fails this tenant only.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    syncWindows:
+      - kind: deny
+        schedule: "0 22 * * *"
+        duration: 8h
+        applications: ["*"]
+        manualSync: true
+    orphanedResources: warn
+  scaffolding:
+    mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-bad-window: "kind must be allow or deny"
+  mto-argocd-tenant-bad-orphaned: "orphaned-resources must be off, warn or monitor"
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata: { name: inherits }
+      spec: {}
+    - metadata:
+        name: overrides
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"allow","schedule":"0 9 * * 1-5","duration":"9h","namespaces":["overrides-prod"],"timeZone":"Europe/Stockholm"}]'
+          argocd.tenantoperator.stakater.com/orphaned-resources: monitor
+      spec: {}
+    - metadata:
+        name: empty
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: "[]"
+          argocd.tenantoperator.stakater.com/orphaned-resources: "off"
+      spec: {}
+    - metadata:
+        name: bad-window
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"maybe","schedule":"* * * * *","duration":"1h"}]'
+      spec: {}
+    - metadata:
+        name: bad-orphaned
+        annotations:
+          argocd.tenantoperator.stakater.com/orphaned-resources: "yes"
+      spec: {}
+
+  namespaces: []

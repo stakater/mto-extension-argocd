@@ -88,6 +88,23 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $useACL := ne .parameters.identityMode "groupPattern" }}
 {{- $usePattern := ne .parameters.identityMode "accessControl" }}
 {{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
+{{- /* #12. Every window is checked field by field and rendered field by field:
+       a value that would apply cleanly but mean something else must fail
+       this tenant instead. */ -}}
+{{- if not (has .parameters.orphanedResources (list "off" "warn" "monitor")) }}
+{{- fail (printf "orphaned-resources must be off, warn or monitor, got %q" .parameters.orphanedResources) }}
+{{- end }}
+{{- $sw := mustFromJson .parameters.syncWindowsJson }}
+{{- if not (kindIs "slice" $sw) }}{{- fail (printf "sync-windows must be a JSON list, got %s" (kindOf $sw)) }}{{- end }}
+{{- range $w := $sw }}
+{{- if not (kindIs "map" $w) }}{{- fail (printf "sync-windows entries must be objects, got %s" (kindOf $w)) }}{{- end }}
+{{- range $k, $_ := $w }}{{- if not (has $k (list "kind" "schedule" "duration" "applications" "namespaces" "clusters" "manualSync" "timeZone")) }}{{- fail (printf "sync-windows: unknown field %q" $k) }}{{- end }}{{- end }}
+{{- if not (has (index $w "kind") (list "allow" "deny")) }}{{- fail (printf "sync-windows: kind must be allow or deny, got %v" (index $w "kind")) }}{{- end }}
+{{- range $k := list "schedule" "duration" }}{{- if or (not (kindIs "string" (index $w $k))) (eq (index $w $k) "") }}{{- fail (printf "sync-windows: %s must be a non-empty string" $k) }}{{- end }}{{- end }}
+{{- if and (hasKey $w "timeZone") (not (kindIs "string" (index $w "timeZone"))) }}{{- fail "sync-windows: timeZone must be a string" }}{{- end }}
+{{- if and (hasKey $w "manualSync") (not (kindIs "bool" (index $w "manualSync"))) }}{{- fail "sync-windows: manualSync must be true or false" }}{{- end }}
+{{- range $k := list "applications" "namespaces" "clusters" }}{{- if hasKey $w $k }}{{- if not (kindIs "slice" (index $w $k)) }}{{- fail (printf "sync-windows: %s must be a list" $k) }}{{- end }}{{- range $s := index $w $k }}{{- if not (kindIs "string" $s) }}{{- fail (printf "sync-windows: %s entries must be strings" $k) }}{{- end }}{{- end }}{{- end }}{{- end }}
+{{- end }}
 {{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
 {{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
 {{- $exec := eq .parameters.rolesExec "true" }}
@@ -148,6 +165,32 @@ spec:
       namespace: {{ $ns | quote }}
       defaultServiceAccount: {{ $.parameters.impersonationServiceAccount | quote }}
   {{- end }}
+  {{- end }}
+  {{- if $sw }}
+  syncWindows:
+  {{- range $w := $sw }}
+    - kind: {{ index $w "kind" | quote }}
+      schedule: {{ index $w "schedule" | quote }}
+      duration: {{ index $w "duration" | quote }}
+      {{- range $k := list "applications" "namespaces" "clusters" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}:
+      {{- range $s := index $w $k }}
+        - {{ $s | quote }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if hasKey $w "manualSync" }}
+      manualSync: {{ index $w "manualSync" }}
+      {{- end }}
+      {{- if hasKey $w "timeZone" }}
+      timeZone: {{ index $w "timeZone" | quote }}
+      {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- if ne .parameters.orphanedResources "off" }}
+  orphanedResources:
+    warn: {{ eq .parameters.orphanedResources "warn" }}
   {{- end }}
   {{- if $wl }}
   clusterResourceWhitelist:

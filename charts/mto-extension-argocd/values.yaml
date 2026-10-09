@@ -87,6 +87,21 @@ argocd:
     enabled: false
     serviceAccount: argocd-deployer
 
+  # Sync windows on every tenant's AppProject (#12): when Applications may or
+  # may not sync. Each entry: kind (allow|deny), schedule (cron), duration,
+  # and optionally applications, namespaces, clusters (lists of globs),
+  # manualSync (bool), timeZone. A Tenant may override with the sync-windows
+  # annotation; [] there means none. Empty here: the field is omitted.
+  syncWindows: []
+
+  # Orphaned-resource monitoring (#12): resources in a destination namespace
+  # that no Application manages.
+  #   off      omitted (default)
+  #   warn     orphanedResources: {warn: true} -- monitored, with warnings
+  #   monitor  orphanedResources: {warn: false} -- monitored, no warnings
+  # A Tenant may override with the orphaned-resources annotation.
+  orphanedResources: "off"
+
   # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
   # a Tenant may override it with the cluster-resource-whitelist annotation.
   # Empty here and absent on the Tenant means the field is omitted from the
@@ -211,6 +226,8 @@ annotations:
   clusterResourceWhitelist: argocd.tenantoperator.stakater.com/cluster-resource-whitelist
   namespaceResourceBlacklist: argocd.tenantoperator.stakater.com/namespace-resource-blacklist
   onDeletePurge: argocd.tenantoperator.stakater.com/on-delete-purge
+  syncWindows: argocd.tenantoperator.stakater.com/sync-windows
+  orphanedResources: argocd.tenantoperator.stakater.com/orphaned-resources
 
 # The IntegrationConfig the parent reads. Supplies accessControl.privileged
 # only -- privileged namespaces (excluded from every tenant's destinations) and

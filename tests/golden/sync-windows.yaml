@@ -1,0 +1,156 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: inherits
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations: []
+  orphanedResources:
+    warn: true
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - inherits-owner-group-298e54
+      name: inherits-owner
+      policies:
+        - p, proj:inherits:inherits-owner, applications, *, inherits/*, allow
+        - p, proj:inherits:inherits-owner, applicationsets, *, inherits/*, allow
+        - p, proj:inherits:inherits-owner, logs, get, inherits/*, allow
+        - p, proj:inherits:inherits-owner, repositories, *, inherits/*, allow
+        - p, proj:inherits:inherits-owner, clusters, get, inherits/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - inherits-edit-group-b029c5
+      name: inherits-edit
+      policies:
+        - p, proj:inherits:inherits-edit, applications, get, inherits/*, allow
+        - p, proj:inherits:inherits-edit, applications, sync, inherits/*, allow
+        - p, proj:inherits:inherits-edit, applications, update, inherits/*, allow
+        - p, proj:inherits:inherits-edit, applications, update/*, inherits/*, allow
+        - p, proj:inherits:inherits-edit, applications, action/*, inherits/*, allow
+        - p, proj:inherits:inherits-edit, applicationsets, get, inherits/*, allow
+        - p, proj:inherits:inherits-edit, logs, get, inherits/*, allow
+        - p, proj:inherits:inherits-edit, repositories, get, inherits/*, allow
+        - p, proj:inherits:inherits-edit, clusters, get, inherits/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - inherits-view-group-41cc4a
+      name: inherits-view
+      policies:
+        - p, proj:inherits:inherits-view, applications, get, inherits/*, allow
+        - p, proj:inherits:inherits-view, applicationsets, get, inherits/*, allow
+        - p, proj:inherits:inherits-view, logs, get, inherits/*, allow
+        - p, proj:inherits:inherits-view, repositories, get, inherits/*, allow
+        - p, proj:inherits:inherits-view, clusters, get, inherits/*, allow
+  syncWindows:
+    - applications:
+        - '*'
+      duration: 8h
+      kind: deny
+      manualSync: true
+      schedule: 0 22 * * *
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: overrides
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations: []
+  orphanedResources:
+    warn: false
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overrides-owner-group-c20e9f
+      name: overrides-owner
+      policies:
+        - p, proj:overrides:overrides-owner, applications, *, overrides/*, allow
+        - p, proj:overrides:overrides-owner, applicationsets, *, overrides/*, allow
+        - p, proj:overrides:overrides-owner, logs, get, overrides/*, allow
+        - p, proj:overrides:overrides-owner, repositories, *, overrides/*, allow
+        - p, proj:overrides:overrides-owner, clusters, get, overrides/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overrides-edit-group-b89dbb
+      name: overrides-edit
+      policies:
+        - p, proj:overrides:overrides-edit, applications, get, overrides/*, allow
+        - p, proj:overrides:overrides-edit, applications, sync, overrides/*, allow
+        - p, proj:overrides:overrides-edit, applications, update, overrides/*, allow
+        - p, proj:overrides:overrides-edit, applications, update/*, overrides/*, allow
+        - p, proj:overrides:overrides-edit, applications, action/*, overrides/*, allow
+        - p, proj:overrides:overrides-edit, applicationsets, get, overrides/*, allow
+        - p, proj:overrides:overrides-edit, logs, get, overrides/*, allow
+        - p, proj:overrides:overrides-edit, repositories, get, overrides/*, allow
+        - p, proj:overrides:overrides-edit, clusters, get, overrides/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - overrides-view-group-1fefa7
+      name: overrides-view
+      policies:
+        - p, proj:overrides:overrides-view, applications, get, overrides/*, allow
+        - p, proj:overrides:overrides-view, applicationsets, get, overrides/*, allow
+        - p, proj:overrides:overrides-view, logs, get, overrides/*, allow
+        - p, proj:overrides:overrides-view, repositories, get, overrides/*, allow
+        - p, proj:overrides:overrides-view, clusters, get, overrides/*, allow
+  syncWindows:
+    - duration: 9h
+      kind: allow
+      namespaces:
+        - overrides-prod
+      schedule: 0 9 * * 1-5
+      timeZone: Europe/Stockholm
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: empty
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations: []
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - empty-owner-group-269e27
+      name: empty-owner
+      policies:
+        - p, proj:empty:empty-owner, applications, *, empty/*, allow
+        - p, proj:empty:empty-owner, applicationsets, *, empty/*, allow
+        - p, proj:empty:empty-owner, logs, get, empty/*, allow
+        - p, proj:empty:empty-owner, repositories, *, empty/*, allow
+        - p, proj:empty:empty-owner, clusters, get, empty/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - empty-edit-group-95967a
+      name: empty-edit
+      policies:
+        - p, proj:empty:empty-edit, applications, get, empty/*, allow
+        - p, proj:empty:empty-edit, applications, sync, empty/*, allow
+        - p, proj:empty:empty-edit, applications, update, empty/*, allow
+        - p, proj:empty:empty-edit, applications, update/*, empty/*, allow
+        - p, proj:empty:empty-edit, applications, action/*, empty/*, allow
+        - p, proj:empty:empty-edit, applicationsets, get, empty/*, allow
+        - p, proj:empty:empty-edit, logs, get, empty/*, allow
+        - p, proj:empty:empty-edit, repositories, get, empty/*, allow
+        - p, proj:empty:empty-edit, clusters, get, empty/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - empty-view-group-c41165
+      name: empty-view
+      policies:
+        - p, proj:empty:empty-view, applications, get, empty/*, allow
+        - p, proj:empty:empty-view, applicationsets, get, empty/*, allow
+        - p, proj:empty:empty-view, logs, get, empty/*, allow
+        - p, proj:empty:empty-view, repositories, get, empty/*, allow
+        - p, proj:empty:empty-view, clusters, get, empty/*, allow

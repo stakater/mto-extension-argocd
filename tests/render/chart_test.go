@@ -152,6 +152,13 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "identity.groupPattern without the tier",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.groupPattern": "tenant-{{ tenant }}"},
 			wantErr: "identity.groupPattern must contain {{ tier }}"},
+		// #12.
+		{name: "invalid argocd.orphanedResources",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.orphanedResources": "yes"},
+			wantErr: "argocd.orphanedResources must be one of off, warn, monitor"},
+		{name: "non-list argocd.syncWindows",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":"nightly"}`},
+			wantErr: "argocd.syncWindows must be a list"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},
@@ -177,7 +184,7 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 	// including on-delete-purge -- is silently ignored and the chart default
 	// silently wins. Nothing would ever error. All four keys, so dropping one
 	// from the validateOverrideKeys range list is caught.
-	for _, key := range []string{"sourceRepos", "clusterResourceWhitelist", "namespaceResourceBlacklist", "onDeletePurge"} {
+	for _, key := range []string{"sourceRepos", "clusterResourceWhitelist", "namespaceResourceBlacklist", "onDeletePurge", "syncWindows", "orphanedResources"} {
 		cases = append(cases, struct {
 			name    string
 			sets    map[string]string

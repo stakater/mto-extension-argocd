@@ -249,6 +249,7 @@ func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
 		{"whitelist", "argocd.tenantoperator.stakater.com/cluster-resource-whitelist"},
 		{"blacklist", "argocd.tenantoperator.stakater.com/namespace-resource-blacklist"},
 		{"source-repos", "argocd.tenantoperator.stakater.com/source-repos"},
+		{"sync-windows", "argocd.tenantoperator.stakater.com/sync-windows"},
 	}
 	for i, raw := range hostile {
 		for _, k := range keys {
