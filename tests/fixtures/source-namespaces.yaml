@@ -1,8 +1,13 @@
 # #9: Applications in the tenant's own namespace. With
 # argocd.sourceNamespaces.enabled, each AppProject gets
-# sourceNamespaces: [<pattern expanded>], default "{{ tenant }}-argocd".
+# sourceNamespaces: [<pattern expanded>], default "{{ tenant }}-argocd", once
+# that namespace exists and carries the tenant's label.
 #
 #   acme   gets sourceNamespaces: [acme-argocd].
+#   beta   beta-argocd does not exist yet: no sourceNamespaces. It also owns
+#          gamma-argocd, which is a destination of beta and nothing more.
+#   gamma  gamma-argocd exists but belongs to beta: no sourceNamespaces, or
+#          beta could create Applications that use gamma's AppProject.
 #   kube   expands to kube-argocd, which matches the privileged ^kube-.*:
 #          refused, this tenant only. A privileged namespace is the platform's.
 #   ops    expands to ops-argocd, which IS the ArgoCD namespace: refused. An
@@ -33,6 +38,10 @@ cluster:
       spec:
         accessControl:
           owners: { groups: [acme-admins] }
+    - metadata: { name: beta }
+      spec: {}
+    - metadata: { name: gamma }
+      spec: {}
     - metadata: { name: kube }
       spec: {}
     - metadata: { name: ops }
@@ -41,3 +50,4 @@ cluster:
   namespaces:
     - metadata: { name: acme-dev, labels: { stakater.com/tenant: acme } }
     - metadata: { name: acme-argocd, labels: { stakater.com/tenant: acme } }
+    - metadata: { name: gamma-argocd, labels: { stakater.com/tenant: beta } }

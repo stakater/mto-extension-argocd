@@ -76,7 +76,8 @@
             "pattern": {
               "type": "string",
               "minLength": 1,
-              "description": "The tenant's Application namespace; {{ tenant }} is expanded. Default {{ tenant }}-argocd."
+              "pattern": "\\{\\{ ?tenant ?\\}\\}",
+              "description": "The tenant's Application namespace; must contain {{ tenant }}, which is expanded, and no globs. Default {{ tenant }}-argocd."
             }
           }
         },
