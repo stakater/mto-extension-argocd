@@ -61,6 +61,10 @@
             "pattern"
           ]
         },
+        "allowClusterResourceNames": {
+          "type": "boolean",
+          "description": "Allow `name` on clusterResourceWhitelist entries (#13). Set true only on ArgoCD 3.3+: older versions drop the name and allow every object of the kind. Default false."
+        },
         "allowControlPlaneDestination": {
           "type": "boolean",
           "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."

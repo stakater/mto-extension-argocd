@@ -79,9 +79,18 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $purge := eq .parameters.onDeletePurge "true" }}
 {{- /* Chart-wide and parent-set values; each must be exactly what the chart
        renders. A near-miss fails this child rather than silently granting. */ -}}
-{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" }}
+{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" "clusterResourceNames" }}
 {{- if not (has (index $.parameters $p) (list "true" "false")) }}
 {{- fail (printf "%s must be exactly \"true\" or \"false\", got %q" $p (index $.parameters $p)) }}
+{{- end }}
+{{- end }}
+{{- /* #13. Before ArgoCD 3.3 the AppProject CRD has no `name` on these entries,
+       and the API server drops the field on apply: a name-restricted entry
+       would then allow EVERY object of its kind. So a name is refused unless
+       the platform confirms ArgoCD 3.3+ with argocd.allowClusterResourceNames. */ -}}
+{{- if ne .parameters.clusterResourceNames "true" }}
+{{- range $i := $wl }}
+{{- if hasKey $i "name" }}{{- fail (printf "clusterResourceWhitelist entry for kind %v has a name, which needs ArgoCD 3.3+: older ArgoCD drops it and allows every %v. Set argocd.allowClusterResourceNames: true once ArgoCD is 3.3 or later" (index $i "kind") (index $i "kind")) }}{{- end }}
 {{- end }}
 {{- end }}
 {{- if not (has .parameters.rolesProfile (list "leastPrivilege" "extensionsCompatible")) }}

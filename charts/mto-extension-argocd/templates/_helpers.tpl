@@ -283,7 +283,7 @@ Application there may use another tenant's AppProject.
 {{- end -}}
 
 {{- /*
-Security-relevant values (#6, #7). The schema types them, but it is skippable,
+Security-relevant values (#6, #7, #13). The schema types them, but it is skippable,
 and a template reads the string "false" as true -- which would grant exec,
 cluster writes or the control-plane destination. An unknown profile must not
 fall back to either role shape silently.
@@ -303,6 +303,22 @@ fall back to either role shape silently.
 {{- $cp := index (.Values.argocd | default dict) "allowControlPlaneDestination" -}}
 {{- if and (not (kindIs "invalid" $cp)) (not (kindIs "bool" $cp)) -}}
 {{- fail (printf "argocd.allowControlPlaneDestination must be true or false (a boolean), got %s %v" (kindOf $cp) $cp) -}}
+{{- end -}}
+{{- /* #13: a whitelist name that ArgoCD before 3.3 would drop, widening the
+       entry to every object of its kind. The child refuses one from an
+       annotation; a chart default would fail every child, so it is refused
+       here at install time. */ -}}
+{{- $crn := index (.Values.argocd | default dict) "allowClusterResourceNames" -}}
+{{- if and (not (kindIs "invalid" $crn)) (not (kindIs "bool" $crn)) -}}
+{{- fail (printf "argocd.allowClusterResourceNames must be true or false (a boolean), got %s %v" (kindOf $crn) $crn) -}}
+{{- end -}}
+{{- $wlv := (.Values.argocd).clusterResourceWhitelist -}}
+{{- if and (not $crn) (kindIs "slice" $wlv) -}}
+{{- range $i := $wlv -}}
+{{- if and (kindIs "map" $i) (hasKey $i "name") -}}
+{{- fail (printf "argocd.clusterResourceWhitelist entry for kind %v has a name, which needs ArgoCD 3.3+: older ArgoCD drops it and allows every %v. Set argocd.allowClusterResourceNames: true once ArgoCD is 3.3 or later" (index $i "kind") (index $i "kind")) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
