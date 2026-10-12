@@ -170,9 +170,10 @@ E2E_ARGO_NS ?= argocd
 
 CERT_MANAGER_VERSION ?= v1.20.0
 CERT_MANAGER_URL ?= https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
-# Pinned to what the live OpenShift cluster runs, so the two environments agree
-# on what ArgoCD accepts.
-ARGOCD_VERSION ?= v3.4.6
+# The current ArgoCD line (#16): 3.5 is where sync impersonation is beta and
+# ApplicationSets in any namespace are stable. OpenShift GitOps 1.22 ships
+# 3.5.3. Override to check an older supported line, e.g. ARGOCD_VERSION=v3.4.10.
+ARGOCD_VERSION ?= v3.5.4
 ARGOCD_URL ?= https://raw.githubusercontent.com/argoproj/argo-cd/$(ARGOCD_VERSION)/manifests/install.yaml
 
 # template-operator-v2's PUBLIC release. Chart and image are both anonymous
