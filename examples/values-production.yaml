@@ -35,9 +35,19 @@ argocd:
   # IntegrationConfig's .spec.integrations.argocd, which is deprecated and no
   # longer read. Miss them and every tenant's AppProject silently loses both
   # lists.
-  clusterResourceWhitelist:
-    - group: ""
-      kind: Namespace
+  #
+  # The whitelist is empty here on purpose. A whitelisted cluster-scoped kind
+  # covers every object of that kind in the cluster: `kind: Namespace` alone
+  # lets every tenant change or delete any namespace, kube-system and other
+  # tenants' included (README, "Cluster-scoped kinds"). On ArgoCD 3.3+,
+  # restrict an entry to exact names instead:
+  #
+  #   allowClusterResourceNames: true
+  #   clusterResourceWhitelist:
+  #     - group: ""
+  #       kind: Namespace
+  #       name: "{{ tenant }}-sandbox"
+  clusterResourceWhitelist: []
   #
   # The blacklist below is the recommended baseline (#11): kinds the
   # Multi-Tenant Operator already owns in tenant namespaces. Let an Application

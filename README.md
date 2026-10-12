@@ -92,7 +92,8 @@ OpenShift GitOps 1.22 ships ArgoCD 3.5.3, 1.21 ships 3.4.3, 1.20 ships 3.3.2.
 |---|---|
 | this chart, security defaults included | ArgoCD 3.0+ |
 | Applications in the tenant's own namespace | ArgoCD 3.x; OpenShift GitOps 1.13+. 3-segment policies (`<project>/<namespace>/<app>`) need 3.4.4+ — OpenShift GitOps 1.21.0 (3.4.3) lacks that fix |
-| `name` on `clusterResourceWhitelist` entries | ArgoCD 3.3+ |
+| `name` on `clusterResourceWhitelist` entries | ArgoCD 3.3+, confirmed with `argocd.allowClusterResourceNames: true`; older ArgoCD drops the name and allows every object of the kind |
+| `description` / `syncOverrun` on sync windows | ArgoCD 3.1+ / 3.5+; older ArgoCD drops them, and a window without `syncOverrun` stays strict |
 | sync impersonation (beta), ApplicationSets in any namespace (stable) | ArgoCD 3.5+; OpenShift GitOps 1.22 |
 
 ## Quick start

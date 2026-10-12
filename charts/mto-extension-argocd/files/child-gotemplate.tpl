@@ -147,6 +147,12 @@ spec:
     - {{ $r | quote }}
   {{- end }}
   {{- end }}
+  {{- if $sns }}
+  sourceNamespaces:
+  {{- range $s := $sns }}
+    - {{ $s | quote }}
+  {{- end }}
+  {{- end }}
   {{- /* The ArgoCD namespace is NOT a destination unless the platform opts in
          (#6). It does not need to be one: the AppProject lives there whatever
          `destinations` says, and destinations only limit where Applications
@@ -158,12 +164,6 @@ spec:
          matches a privileged pattern, and guarded against listing it twice
          when the parent already put it in namespacesJson (labelled for this
          tenant and not privileged). */}}
-  {{- if $sns }}
-  sourceNamespaces:
-  {{- range $s := $sns }}
-    - {{ $s | quote }}
-  {{- end }}
-  {{- end }}
   {{- $dests := $nsList }}
   {{- if and $cp (not (has $argoNs $nsList)) }}{{- $dests = append $nsList $argoNs }}{{- end }}
   {{- if $dests }}
