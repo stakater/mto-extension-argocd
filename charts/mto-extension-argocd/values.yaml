@@ -67,8 +67,10 @@ argocd:
   # namespace cannot be both managed-by and a source namespace without custom
   # roles. The namespace itself comes from the Multi-Tenant Operator (for
   # example namespaces.withTenantPrefix: [argocd]); this chart only writes the
-  # AppProject. A pattern that expands to the ArgoCD namespace or to a
-  # privileged namespace fails that tenant.
+  # AppProject, and lists the namespace only once it exists with the tenant's
+  # label. The pattern must contain {{ tenant }} and expand to a plain name, no
+  # globs. One that expands to the ArgoCD namespace or to a privileged
+  # namespace fails that tenant.
   sourceNamespaces:
     enabled: false
     pattern: "{{ tenant }}-argocd"

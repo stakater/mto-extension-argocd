@@ -124,6 +124,7 @@ one is actually for:
 | Live object semantics | `TestLiveObjectSemantics` | an AppProject that already exists is adopted **in place** (same UID — migration's load-bearing claim), a namespace moves cleanly between tenants, the ArgoCD namespace is listed once, an explicit `[]` strips the field from the live object, the sourceRepos pattern expands per tenant, a values change updates in place |
 | Blast radius | `TestFailuresStayContained` | a malformed annotation fails one tenant and moves no other object; an unreadable or missing IntegrationConfig fails the parent and leaves the fleet running; deleting a Tenant reaps only its own child; the parent's roll-up names the broken tenant |
 | ArgoCD itself | `TestArgoCDHonoursTheRenderedProject` | ArgoCD refuses an Application outside the rendered destinations and accepts one inside them |
+| Source namespaces | `TestSourceNamespaces` | a tenant's source namespace is listed only while it exists with the tenant's label: absent until created, never when it belongs to another tenant, removed from the live object when relabelled; ArgoCD runs an Application there under the tenant's own project and refuses one under another tenant's. `make e2e-argocd` sets `application.namespaces: "*-argocd"` for this; the ArgoCD subtests skip on a cluster without it |
 | RBAC | `TestLeastPrivilegeDelta` | the chart grants exactly five permissions and no others, measured as a before/after delta |
 | Upstream characterization | `TestRevertModeWedgesOnDelete` | the `revert` wedge, reported either way so a fix upstream is visible |
 

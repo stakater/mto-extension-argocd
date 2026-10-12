@@ -436,10 +436,17 @@ func deleteNamespace(t *testing.T, name string) {
 // before and independently of the repo.
 func createApplication(t *testing.T, name, project, namespace string) {
 	t.Helper()
+	createApplicationIn(t, argoNS, name, project, namespace)
+}
+
+// createApplicationIn is createApplication for an Application stored in appNS
+// rather than the ArgoCD namespace -- Applications in any namespace (#9).
+func createApplicationIn(t *testing.T, appNS, name, project, namespace string) {
+	t.Helper()
 	app := &unstructured.Unstructured{}
 	app.SetGroupVersionKind(gvkApplication)
 	app.SetName(name)
-	app.SetNamespace(argoNS)
+	app.SetNamespace(appNS)
 	app.Object["spec"] = map[string]any{
 		"project": project,
 		"source": map[string]any{
@@ -462,10 +469,15 @@ func createApplication(t *testing.T, name, project, namespace string) {
 
 func deleteApplication(t *testing.T, name string) {
 	t.Helper()
+	deleteApplicationIn(t, argoNS, name)
+}
+
+func deleteApplicationIn(t *testing.T, appNS, name string) {
+	t.Helper()
 	app := &unstructured.Unstructured{}
 	app.SetGroupVersionKind(gvkApplication)
 	app.SetName(name)
-	app.SetNamespace(argoNS)
+	app.SetNamespace(appNS)
 	// Logged, not fatal: a failed cleanup here surfaces on the NEXT create as
 	// AlreadyExists, and this line is what explains it.
 	if err := k8s.Delete(context.Background(), app); err != nil && !apierrors.IsNotFound(err) {
@@ -477,7 +489,12 @@ func deleteApplication(t *testing.T, name string) {
 // every assertion here is "does ArgoCD say this anywhere".
 func appConditions(t *testing.T, name string) string {
 	t.Helper()
-	app := get(t, gvkApplication, argoNS, name)
+	return appConditionsIn(t, argoNS, name)
+}
+
+func appConditionsIn(t *testing.T, appNS, name string) string {
+	t.Helper()
+	app := get(t, gvkApplication, appNS, name)
 	if app == nil {
 		return ""
 	}
@@ -495,7 +512,12 @@ func appConditions(t *testing.T, name string) string {
 
 func appSyncStatus(t *testing.T, name string) string {
 	t.Helper()
-	app := get(t, gvkApplication, argoNS, name)
+	return appSyncStatusIn(t, argoNS, name)
+}
+
+func appSyncStatusIn(t *testing.T, appNS, name string) string {
+	t.Helper()
+	app := get(t, gvkApplication, appNS, name)
 	if app == nil {
 		return ""
 	}
