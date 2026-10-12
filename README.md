@@ -191,7 +191,7 @@ Six settings can be overridden per tenant, as annotations under
 | `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind}` |
 | `namespace-resource-blacklist` | `argocd.namespaceResourceBlacklist` | JSON array of `{group, kind}` |
 | `on-delete-purge` | `onDeletePurgeAppProject` | `"true"` or `"false"` |
-| `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, timeZone?}` |
+| `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, andOperator?, timeZone?, description?, syncOverrun?}`. `schedule` is a five-field cron, `duration` a Go duration such as `8h`; `description` needs ArgoCD 3.1+, `syncOverrun` 3.5+ |
 | `orphaned-resources` | `argocd.orphanedResources` | `off`, `warn` or `monitor` |
 
 An **absent** annotation inherits the chart default. An explicit `[]`

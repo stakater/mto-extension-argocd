@@ -102,11 +102,14 @@ spec:
         - p, proj:overrides:overrides-view, repositories, get, overrides/*, allow
         - p, proj:overrides:overrides-view, clusters, get, overrides/*, allow
   syncWindows:
-    - duration: 9h
+    - andOperator: true
+      description: office hours
+      duration: 9h
       kind: allow
       namespaces:
         - overrides-prod
       schedule: 0 9 * * 1-5
+      syncOverrun: true
       timeZone: Europe/Stockholm
 ---
 apiVersion: argoproj.io/v1alpha1

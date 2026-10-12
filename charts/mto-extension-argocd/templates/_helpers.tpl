@@ -261,6 +261,21 @@ Application there may use another tenant's AppProject.
 {{- if and (hasKey $a "syncWindows") (not (kindIs "invalid" $a.syncWindows)) (not (kindIs "slice" $a.syncWindows)) -}}
 {{- fail (printf "argocd.syncWindows must be a list of windows, got %s" (kindOf $a.syncWindows)) -}}
 {{- end -}}
+{{- /* The chart default reaches every tenant, so a bad schedule or duration
+       here would fail every child. The child checks the rest of each window. */ -}}
+{{- range $w := $a.syncWindows | default list -}}
+{{- if not (kindIs "map" $w) -}}
+{{- fail (printf "argocd.syncWindows entries must be objects, got %s" (kindOf $w)) -}}
+{{- end -}}
+{{- $sch := index $w "schedule" -}}
+{{- $dur := index $w "duration" -}}
+{{- if not (and (kindIs "string" $sch) (regexMatch "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$" $sch)) -}}
+{{- fail (printf "argocd.syncWindows: schedule %v must be a cron expression with five fields: minute hour day-of-month month day-of-week" $sch) -}}
+{{- end -}}
+{{- if not (and (kindIs "string" $dur) (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $dur)) -}}
+{{- fail (printf "argocd.syncWindows: duration %v must be a Go duration, such as 8h or 1h30m" $dur) -}}
+{{- end -}}
+{{- end -}}
 {{- $o := $a.orphanedResources | default "off" | toString -}}
 {{- if not (has $o (list "off" "warn" "monitor")) -}}
 {{- fail (printf "argocd.orphanedResources must be one of off, warn, monitor -- got %q" $o) -}}

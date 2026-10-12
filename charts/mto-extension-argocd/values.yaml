@@ -90,9 +90,11 @@ argocd:
     serviceAccount: argocd-deployer
 
   # Sync windows on every tenant's AppProject (#12): when Applications may or
-  # may not sync. Each entry: kind (allow|deny), schedule (cron), duration,
-  # and optionally applications, namespaces, clusters (lists of globs),
-  # manualSync (bool), timeZone. A Tenant may override with the sync-windows
+  # may not sync. Each entry: kind (allow|deny), schedule (cron, exactly five
+  # fields), duration (Go, e.g. 8h), and optionally applications, namespaces,
+  # clusters (lists of globs), manualSync, andOperator (bools), timeZone,
+  # description (3.1+) and syncOverrun (bool, 3.5+; older ArgoCD drops it and
+  # the window stays strict). A Tenant may override with the sync-windows
   # annotation; [] there means none. Empty here: the field is omitted.
   syncWindows: []
 
