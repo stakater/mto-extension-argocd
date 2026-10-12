@@ -128,8 +128,18 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "empty argocd.sourceNamespaces.pattern",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": ""},
 			wantErr: "argocd.sourceNamespaces.pattern must be a non-empty string"},
+		// Without {{ tenant }} every AppProject lists the same namespace; a
+		// glob matches other tenants' namespaces. Both are cross-tenant.
+		{name: "sourceNamespaces pattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "shared-apps"},
+			wantErr: "argocd.sourceNamespaces.pattern must contain {{ tenant }}"},
+		{name: "sourceNamespaces glob pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}*"`},
+			wantErr: "must expand to a plain namespace name"},
 		{name: "unrecognised sourceNamespaces placeholder",
-			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "${tenant}-argocd"},
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}-${env}"`},
 			wantErr: "unrecognised placeholder"},
 		// #15. A string "false" would turn impersonation on.
 		{name: "non-boolean argocd.impersonation.enabled",
