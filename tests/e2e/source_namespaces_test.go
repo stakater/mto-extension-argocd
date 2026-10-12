@@ -75,7 +75,7 @@ func TestSourceNamespaces(t *testing.T) {
 			return appSyncStatusIn(t, alphaApps, name) != ""
 		})
 		time.Sleep(settle)
-		if c := appConditionsIn(t, alphaApps, name); strings.Contains(c, "not allowed to use project") {
+		if c := appConditionsIn(t, alphaApps, name); refusesProject(c) {
 			t.Errorf("the tenant's own source namespace was refused: %s", c)
 		}
 	})
@@ -89,7 +89,7 @@ func TestSourceNamespaces(t *testing.T) {
 		t.Cleanup(func() { deleteApplicationIn(t, alphaApps, name) })
 
 		waitFor(t, "ArgoCD to refuse the other tenant's project", func() bool {
-			return strings.Contains(appConditionsIn(t, alphaApps, name), "not allowed to use project")
+			return refusesProject(appConditionsIn(t, alphaApps, name))
 		})
 	})
 
@@ -119,6 +119,15 @@ func TestSourceNamespaces(t *testing.T) {
 			return len(sourceNamespacesOf(t, tenant)) == 0
 		})
 	})
+}
+
+// refusesProject reports whether ArgoCD refused the Application's project for
+// its namespace. The controller and the API server word it differently: "is
+// not permitted to use project" (argo.ErrProjectNotPermitted) and "is not
+// allowed to use project" (ErrApplicationNotAllowedToUseProject).
+func refusesProject(conditions string) bool {
+	return strings.Contains(conditions, "not permitted to use project") ||
+		strings.Contains(conditions, "not allowed to use project")
 }
 
 func sourceNamespacesOf(t *testing.T, name string) []string {
