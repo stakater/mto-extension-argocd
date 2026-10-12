@@ -361,6 +361,13 @@ Also needed, outside this chart:
    impersonation enforces tenant boundaries at sync time, but the controller
    still holds cluster-admin.
 
+ArgoCD picks the account by the Application's destination namespace, and the
+template above grants it `edit` in that namespace only. Two kinds of
+Application therefore stop syncing: one that carries a cluster-scoped kind from
+`clusterResourceWhitelist`, such as a `Namespace`, and one whose manifests put
+objects into another namespace. Grant those rights to the deployer
+deliberately, or keep such Applications out of tenant projects.
+
 ## Before production
 
 Four ways to end up with something that looks correct and isn't.
