@@ -12,8 +12,6 @@ spec:
   destinations:
     - namespace: custom-dev
       server: https://kubernetes.default.svc
-    - namespace: argo-cd
-      server: https://kubernetes.default.svc
   namespaceResourceBlacklist:
     - group: ""
       kind: ResourceQuota
@@ -26,21 +24,23 @@ spec:
       policies:
         - p, proj:custom:custom-owner, applications, *, custom/*, allow
         - p, proj:custom:custom-owner, applicationsets, *, custom/*, allow
-        - p, proj:custom:custom-owner, logs, *, custom/*, allow
-        - p, proj:custom:custom-owner, exec, *, custom/*, allow
+        - p, proj:custom:custom-owner, logs, get, custom/*, allow
         - p, proj:custom:custom-owner, repositories, *, custom/*, allow
-        - p, proj:custom:custom-owner, clusters, *, custom/*, allow
+        - p, proj:custom:custom-owner, clusters, get, custom/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - custom-edit-group-0f43ea
       name: custom-edit
       policies:
-        - p, proj:custom:custom-edit, applications, *, custom/*, allow
-        - p, proj:custom:custom-edit, applicationsets, *, custom/*, allow
-        - p, proj:custom:custom-edit, logs, *, custom/*, allow
-        - p, proj:custom:custom-edit, exec, *, custom/*, allow
-        - p, proj:custom:custom-edit, repositories, *, custom/*, allow
-        - p, proj:custom:custom-edit, clusters, *, custom/*, allow
+        - p, proj:custom:custom-edit, applications, get, custom/*, allow
+        - p, proj:custom:custom-edit, applications, sync, custom/*, allow
+        - p, proj:custom:custom-edit, applications, update, custom/*, allow
+        - p, proj:custom:custom-edit, applications, update/*, custom/*, allow
+        - p, proj:custom:custom-edit, applications, action/*, custom/*, allow
+        - p, proj:custom:custom-edit, applicationsets, get, custom/*, allow
+        - p, proj:custom:custom-edit, logs, get, custom/*, allow
+        - p, proj:custom:custom-edit, repositories, get, custom/*, allow
+        - p, proj:custom:custom-edit, clusters, get, custom/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - custom-view-group-8efadb
@@ -49,7 +49,6 @@ spec:
         - p, proj:custom:custom-view, applications, get, custom/*, allow
         - p, proj:custom:custom-view, applicationsets, get, custom/*, allow
         - p, proj:custom:custom-view, logs, get, custom/*, allow
-        - p, proj:custom:custom-view, exec, get, custom/*, allow
         - p, proj:custom:custom-view, repositories, get, custom/*, allow
         - p, proj:custom:custom-view, clusters, get, custom/*, allow
   sourceRepos:

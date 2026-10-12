@@ -70,6 +70,20 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- fail (printf "on-delete-purge must be exactly \"true\" or \"false\", got %q" .parameters.onDeletePurge) }}
 {{- end }}
 {{- $purge := eq .parameters.onDeletePurge "true" }}
+{{- /* Chart-wide and parent-set values; each must be exactly what the chart
+       renders. A near-miss fails this child rather than silently granting. */ -}}
+{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" }}
+{{- if not (has (index $.parameters $p) (list "true" "false")) }}
+{{- fail (printf "%s must be exactly \"true\" or \"false\", got %q" $p (index $.parameters $p)) }}
+{{- end }}
+{{- end }}
+{{- if not (has .parameters.rolesProfile (list "leastPrivilege" "extensionsCompatible")) }}
+{{- fail (printf "rolesProfile must be leastPrivilege or extensionsCompatible, got %q" .parameters.rolesProfile) }}
+{{- end }}
+{{- $cp := eq .parameters.controlPlaneDestination "true" }}
+{{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
+{{- $exec := eq .parameters.rolesExec "true" }}
+{{- $clusters := eq .parameters.rolesClusters "true" }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -87,20 +101,27 @@ spec:
     - {{ $r | quote }}
   {{- end }}
   {{- end }}
+  {{- /* The ArgoCD namespace is NOT a destination unless the platform opts in
+         (#6). It does not need to be one: the AppProject lives there whatever
+         `destinations` says, and destinations only limit where Applications
+         deploy. As a destination it is a path to ArgoCD admin -- an
+         Application in the control-plane namespace may reference any
+         AppProject, and the controller syncing into it is cluster-admin.
+
+         With the opt-in it is the legacy shape exactly: appended even when it
+         matches a privileged pattern, and guarded against listing it twice
+         when the parent already put it in namespacesJson (labelled for this
+         tenant and not privileged). */}}
+  {{- $dests := $nsList }}
+  {{- if and $cp (not (has $argoNs $nsList)) }}{{- $dests = append $nsList $argoNs }}{{- end }}
+  {{- if $dests }}
   destinations:
-  {{- range $ns := $nsList }}
+  {{- range $ns := $dests }}
     - namespace: {{ $ns | quote }}
       server: https://kubernetes.default.svc
   {{- end }}
-  {{- /* The ArgoCD namespace is always a destination, even when it matches a
-         privileged pattern -- ArgoCD itself needs it to manage the project.
-
-         Guarded against listing it twice: if the ArgoCD namespace also carries
-         the tenant label and is not privileged, the parent already put it in
-         namespacesJson. */}}
-  {{- if not (has $argoNs $nsList) }}
-    - namespace: {{ $argoNs | quote }}
-      server: https://kubernetes.default.svc
+  {{- else }}
+  destinations: []
   {{- end }}
   {{- if $wl }}
   clusterResourceWhitelist:
@@ -120,21 +141,36 @@ spec:
   {{- range $role := list "owner" "edit" "view" }}
   {{- /* Go's hex(sha256("<tenant>-<role>"))[:6]. Reproduced exactly by sprig. */}}
   {{- $hash := sha256sum (printf "%s-%s" $t $role) | trunc 6 }}
+  {{- /* Policy rules as resource/action pairs. #7: least privilege by default;
+         the legacy six-line `*`/`get` shape only with extensionsCompatible. */}}
+  {{- $rules := list }}
+  {{- if $legacyRoles }}
   {{- $verb := ternary "get" "*" (eq $role "view") }}
+  {{- range $res := list "applications" "applicationsets" "logs" "exec" "repositories" "clusters" }}
+  {{- $rules = append $rules (list $res $verb) }}
+  {{- end }}
+  {{- else if eq $role "owner" }}
+  {{- $rules = list (list "applications" "*") (list "applicationsets" "*") (list "logs" "get") }}
+  {{- if $exec }}{{- $rules = append $rules (list "exec" "create") }}{{- end }}
+  {{- $rules = append $rules (list "repositories" "*") }}
+  {{- $rules = append $rules (list "clusters" (ternary "*" "get" $clusters)) }}
+  {{- else if eq $role "edit" }}
+  {{- /* No create, delete or override: edit syncs and updates what exists. */}}
+  {{- $rules = list (list "applications" "get") (list "applications" "sync") (list "applications" "update") (list "applications" "update/*") (list "applications" "action/*") (list "applicationsets" "get") (list "logs" "get") (list "repositories" "get") (list "clusters" "get") }}
+  {{- else }}
+  {{- $rules = list (list "applications" "get") (list "applicationsets" "get") (list "logs" "get") (list "repositories" "get") (list "clusters" "get") }}
+  {{- end }}
     - name: {{ printf "%s-%s" $t $role | quote }}
       description: >-
         Role that gives {{ if eq $role "owner" }}full{{ else }}{{ $role }}{{ end }} access to all
         resources inside the tenant's namespace to the tenant owner group
-      {{- /* One line per project-scoped resource, not `*`. ArgoCD's API
-             validation refuses `*` as the resource of a project role policy,
-             so with `*` every write through the ArgoCD API -- create-token,
-             delete-token, the UI -- fails with "project resource must be:
-             ...". At runtime `*` and these six lines grant the same access:
-             verified on ArgoCD 3.4.6 with can-i over every resource and
-             action, for an owner and a viewer. */}}
+      {{- /* One line per resource/action, never `*` as the resource: ArgoCD's
+             API refuses it in a project role policy, so every write through
+             the ArgoCD API -- create-token, delete-token, the UI -- would fail
+             with "project resource must be: ...". */}}
       policies:
-      {{- range $res := list "applications" "applicationsets" "logs" "exec" "repositories" "clusters" }}
-        - {{ printf "p, proj:%s:%s-%s, %s, %s, %s/*, allow" $t $t $role $res $verb $t | quote }}
+      {{- range $r := $rules }}
+        - {{ printf "p, proj:%s:%s-%s, %s, %s, %s/*, allow" $t $t $role (index $r 0) (index $r 1) $t | quote }}
       {{- end }}
       {{- /* Order is load-bearing for the equivalence diff: generated group,
              then the IntegrationConfig's privileged groups, then the tenant's

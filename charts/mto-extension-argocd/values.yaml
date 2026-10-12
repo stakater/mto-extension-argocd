@@ -38,6 +38,22 @@ argocd:
   # .namespace, which is deprecated.
   namespace: ""
 
+  # Whether the ArgoCD namespace is a destination of every tenant's AppProject.
+  #
+  # false (the default, and the safe value): it never is -- not appended, and
+  # not kept even when the namespace carries a tenant's label. An Application in
+  # the control-plane namespace may reference ANY AppProject, and the
+  # application controller that syncs into it is cluster-admin, so a tenant
+  # that can deploy there can create Applications, AppProjects or repository
+  # and cluster Secrets for every project: ArgoCD admin. See #6 and
+  # https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/
+  #
+  # true: the legacy ExtensionsArgoCDReconciler output, exactly -- appended for
+  # every tenant, even when it matches a privileged pattern. UNSAFE. Only for a
+  # migration that must first reproduce the old AppProjects; move tenants'
+  # Applications out of the control plane (sourceNamespaces) and set it back.
+  allowControlPlaneDestination: false
+
   # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
   # a Tenant may override it with the cluster-resource-whitelist annotation.
   # Empty here and absent on the Tenant means the field is omitted from the
@@ -75,6 +91,35 @@ argocd:
     # against the old controller's output. A Tenant may override with the
     # source-repos annotation.
     pattern: []
+
+# The three project roles (<tenant>-owner, -edit, -view).
+roles:
+  # leastPrivilege | extensionsCompatible
+  #
+  #   leastPrivilege        the default (#7):
+  #                           owner  applications *, applicationsets *, logs get,
+  #                                  repositories *, clusters get
+  #                           edit   applications get, sync, update, update/*,
+  #                                  action/*; applicationsets, logs,
+  #                                  repositories, clusters get
+  #                           view   get on all five
+  #                         Edit cannot create, delete or override Applications.
+  #   extensionsCompatible  the legacy ExtensionsArgoCDReconciler shape: `*` on
+  #                         all six project resources for owner AND edit
+  #                         (exec and cluster writes included), `get` for view.
+  #                         Only for a migration that must first match the old
+  #                         AppProjects.
+  profile: leastPrivilege
+  # ArgoCD's web terminal runs as the argocd-server ServiceAccount, not as the
+  # user -- outside the tenant's own RBAC and audit trail. Off by default; when
+  # on, owner only, and ArgoCD itself also needs exec.enabled in argocd-cm.
+  # Ignored by extensionsCompatible.
+  exec:
+    enabled: false
+  # Registering project-scoped clusters. Off by default (owner gets clusters
+  # get); when on, owner gets clusters *. Ignored by extensionsCompatible.
+  clusters:
+    enabled: false
 
 # Which Tenants get an AppProject.
 scaffolding:

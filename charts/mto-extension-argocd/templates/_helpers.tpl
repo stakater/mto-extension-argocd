@@ -194,6 +194,30 @@ into [].
 {{- end -}}
 
 {{- /*
+Security-relevant values (#6, #7). The schema types them, but it is skippable,
+and a template reads the string "false" as true -- which would grant exec,
+cluster writes or the control-plane destination. An unknown profile must not
+fall back to either role shape silently.
+*/ -}}
+{{- define "mto-extension-argocd.validateSecurityValues" -}}
+{{- $roles := .Values.roles | default dict -}}
+{{- $profile := $roles.profile | default "leastPrivilege" | toString -}}
+{{- if not (has $profile (list "leastPrivilege" "extensionsCompatible")) -}}
+{{- fail (printf "roles.profile must be one of leastPrivilege, extensionsCompatible -- got %q" $profile) -}}
+{{- end -}}
+{{- range $k := list "exec" "clusters" -}}
+{{- $v := index ((index $roles $k) | default dict) "enabled" -}}
+{{- if and (not (kindIs "invalid" $v)) (not (kindIs "bool" $v)) -}}
+{{- fail (printf "roles.%s.enabled must be true or false (a boolean), got %s %v" $k (kindOf $v) $v) -}}
+{{- end -}}
+{{- end -}}
+{{- $cp := index (.Values.argocd | default dict) "allowControlPlaneDestination" -}}
+{{- if and (not (kindIs "invalid" $cp)) (not (kindIs "bool" $cp)) -}}
+{{- fail (printf "argocd.allowControlPlaneDestination must be true or false (a boolean), got %s %v" (kindOf $cp) $cp) -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
 The same reasoning as the sync.mode guard below: values.schema.json already has
 an enum, but the schema is skippable (helm >= 3.16 --skip-schema-validation) and
 is not applied on every path that renders a chart through the Helm SDK.

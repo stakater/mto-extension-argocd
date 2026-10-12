@@ -42,7 +42,7 @@ const (
 	// annotation again on their way out.
 	fixtureTenantSecondary = "e2e-beta"
 	// A tenant with no namespaces at all. Its AppProject must still be
-	// created, with the ArgoCD namespace as its only destination.
+	// created, with no destinations (the ArgoCD namespace is never one, #6).
 	fixtureTenantEmpty = "e2e-gamma"
 
 	// The IntegrationConfig hack/e2e/integrationconfig.yaml creates, which is
@@ -67,11 +67,10 @@ var fixtureNamespaces = map[string]string{
 }
 
 // expectedDestinations is what fixtureTenant's AppProject should list, in no
-// particular order: its two ordinary namespaces plus the ArgoCD namespace,
-// which is always a destination. The privileged one is absent, which is
-// the whole point of the fixture.
+// particular order: its two ordinary namespaces. The privileged one is absent,
+// which is the whole point of the fixture, and so is the ArgoCD namespace (#6).
 func expectedDestinations() []string {
-	return []string{"e2e-alpha-dev", "e2e-alpha-prod", argoNS}
+	return []string{"e2e-alpha-dev", "e2e-alpha-prod"}
 }
 
 // allFixtureTenants is every tenant the suite owns, in a stable order. Only

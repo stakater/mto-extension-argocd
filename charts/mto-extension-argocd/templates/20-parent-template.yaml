@@ -32,6 +32,10 @@ spec:
     - name: argoNamespace
       value: {{ .Values.argocd.namespace | quote }}
       exposeInStatus: true
+    {{- include "mto-extension-argocd.validateSecurityValues" . }}
+    {{- /* #6: whether the ArgoCD namespace may be a tenant destination. */}}
+    - name: allowControlPlaneDestination
+      value: {{ (.Values.argocd).allowControlPlaneDestination | default false | toString | quote }}
     {{- /* Covers tenantNamespaceLabel, both scaffolding keys and the four
            override annotation keys below: an empty key matches nothing, so the
            override it carries is silently ignored. */}}
