@@ -1,6 +1,6 @@
 # ADR-0009: Least-privilege project roles
 
-- **Status:** Proposed — **security, priority**
+- **Status:** Accepted (2026-10-12) — **security, priority**
 - **Date:** 2026-10-09
 
 ## Context
@@ -28,5 +28,5 @@ nothing.
 
 ## Alternatives
 
-- **Keep equivalence.** Rejected for new installs; possible as a compatibility
-  value during migration.
+- **Keep equivalence.** Rejected for new installs; kept as the compatibility
+  value `roles.profile: extensionsCompatible`, for migration only.

@@ -13,7 +13,8 @@ features work where customers run them.
 
 ## Governing constraints
 
-ADR-0006..0010 are Proposed. ADR-0001..0005 are built and stay. Record exact
+ADR-0006..0010 are Accepted and built (chart 0.2.0 to 0.7.0); A.0 confirms
+them on live clusters or supersedes them. ADR-0001..0005 are built and stay. Record exact
 versions. No credentials in findings.
 
 ## Design

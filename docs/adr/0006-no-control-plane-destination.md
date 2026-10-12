@@ -1,6 +1,6 @@
 # ADR-0006: The Argo CD namespace is not a tenant destination
 
-- **Status:** Proposed — **security, priority**
+- **Status:** Accepted (2026-10-12) — **security, priority**
 - **Date:** 2026-10-09
 - **Revises:** ADR-0002 (destinations)
 

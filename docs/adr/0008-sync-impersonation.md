@@ -1,6 +1,6 @@
 # ADR-0008: Sync impersonation, opt-in, one deployer per tenant namespace
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-12)
 - **Date:** 2026-10-09
 
 ## Context

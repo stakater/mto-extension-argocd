@@ -1,6 +1,6 @@
 # ADR-0010: Optional group-pattern identity
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-12)
 - **Date:** 2026-10-09
 
 ## Context
