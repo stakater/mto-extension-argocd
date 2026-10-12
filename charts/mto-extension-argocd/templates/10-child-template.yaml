@@ -42,19 +42,17 @@ spec:
     {{- /* Set per child by the parent (#6). */}}
     - name: controlPlaneDestination
       value: "false"
-    {{- /* #9, set per child by the parent. JSON lists, never "" -- an empty
-           string is an unset parameter to template-operator-v2. */}}
     {{- /* #12, set per child by the parent. */}}
     - name: syncWindowsJson
       value: "[]"
     - name: orphanedResources
       value: "off"
+    {{- /* #9, set per child by the parent. JSON lists, never "" -- an empty
+           string is an unset parameter to template-operator-v2. */}}
     - name: sourceNamespacesJson
       value: "[]"
     - name: sourceNamespacesRefusedJson
       value: "[]"
-    {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
-           has already refused anything else. */}}
     {{- /* #15, chart-wide; validateImpersonation on the parent has already
            refused a non-boolean or a non-name. */}}
     - name: impersonation
@@ -67,6 +65,8 @@ spec:
       value: {{ (.Values.identity).mode | default "accessControl" | quote }}
     - name: identityGroupPattern
       value: {{ (.Values.identity).groupPattern | default "tenant-{{ tenant }}-{{ tier }}" | quote }}
+    {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
+           has already refused anything else. */}}
     - name: rolesProfile
       value: {{ (.Values.roles).profile | default "leastPrivilege" | quote }}
     - name: rolesExec

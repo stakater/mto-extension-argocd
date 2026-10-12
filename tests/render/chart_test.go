@@ -128,8 +128,18 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "empty argocd.sourceNamespaces.pattern",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": ""},
 			wantErr: "argocd.sourceNamespaces.pattern must be a non-empty string"},
+		// Without {{ tenant }} every AppProject lists the same namespace; a
+		// glob matches other tenants' namespaces. Both are cross-tenant.
+		{name: "sourceNamespaces pattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "shared-apps"},
+			wantErr: "argocd.sourceNamespaces.pattern must contain {{ tenant }}"},
+		{name: "sourceNamespaces glob pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}*"`},
+			wantErr: "must expand to a plain namespace name"},
 		{name: "unrecognised sourceNamespaces placeholder",
-			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "${tenant}-argocd"},
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}-${env}"`},
 			wantErr: "unrecognised placeholder"},
 		// #15. A string "false" would turn impersonation on.
 		{name: "non-boolean argocd.impersonation.enabled",
@@ -159,6 +169,14 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "non-list argocd.syncWindows",
 			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":"nightly"}`},
 			wantErr: "argocd.syncWindows must be a list"},
+		// The default reaches every tenant: a bad schedule or duration there
+		// would fail every child, so it is refused at install time.
+		{name: "argocd.syncWindows default with a bad cron",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":[{"kind":"deny","schedule":"every night","duration":"8h"}]}`},
+			wantErr: "must be a cron expression with five fields"},
+		{name: "argocd.syncWindows default with a bad duration",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":[{"kind":"deny","schedule":"0 22 * * *","duration":"8 hours"}]}`},
+			wantErr: "must be a Go duration"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},
