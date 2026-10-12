@@ -48,8 +48,6 @@ spec:
       value: "[]"
     - name: sourceNamespacesRefusedJson
       value: "[]"
-    {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
-           has already refused anything else. */}}
     {{- /* #15, chart-wide; validateImpersonation on the parent has already
            refused a non-boolean or a non-name. */}}
     - name: impersonation
@@ -62,6 +60,8 @@ spec:
       value: {{ (.Values.identity).mode | default "accessControl" | quote }}
     - name: identityGroupPattern
       value: {{ (.Values.identity).groupPattern | default "tenant-{{ tenant }}-{{ tier }}" | quote }}
+    {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
+           has already refused anything else. */}}
     - name: rolesProfile
       value: {{ (.Values.roles).profile | default "leastPrivilege" | quote }}
     - name: rolesExec
