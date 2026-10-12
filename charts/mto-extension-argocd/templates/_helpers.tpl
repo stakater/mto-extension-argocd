@@ -194,10 +194,11 @@ into [].
 {{- end -}}
 
 {{- /*
-Security-relevant values (#6, #7). The schema types them, but it is skippable,
-and a template reads the string "false" as true -- which would grant exec,
-cluster writes or the control-plane destination. An unknown profile must not
-fall back to either role shape silently.
+#9. ArgoCD matches sourceNamespaces as globs and regexes, so the pattern must
+expand to exactly one namespace name, and a different one per tenant. Without
+{{ tenant }} every AppProject lists the same namespace; with a glob,
+"{{ tenant }}*" for acme also matches acme-corp-argocd. Either way an
+Application there may use another tenant's AppProject.
 */ -}}
 {{- define "mto-extension-argocd.validateSourceNamespaces" -}}
 {{- $sn := (.Values.argocd).sourceNamespaces | default dict -}}
@@ -208,11 +209,17 @@ fall back to either role shape silently.
 {{- if and (hasKey $sn "pattern") (or (not (kindIs "string" $sn.pattern)) (eq $sn.pattern "")) -}}
 {{- fail "argocd.sourceNamespaces.pattern must be a non-empty string; {{ tenant }} is expanded to the tenant's name" -}}
 {{- end -}}
+{{- if not (or (contains "{{ tenant }}" $p) (contains "{{tenant}}" $p)) -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern must contain {{ tenant }}, got %q: without it every tenant's AppProject accepts Applications from the same namespace" $p) -}}
+{{- end -}}
 {{- $expanded := replace "{{tenant}}" "x" (replace "{{ tenant }}" "x" $p) -}}
 {{- range $residue := list "{{" "${" "$(" "%s" -}}
 {{- if contains $residue $expanded -}}
 {{- fail (printf "argocd.sourceNamespaces.pattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
 {{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $expanded) -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern %q must expand to a plain namespace name (lowercase letters, digits and -); ArgoCD reads a glob or regex there, which can match another tenant's namespace" $p) -}}
 {{- end -}}
 {{- end -}}
 
@@ -254,12 +261,33 @@ fall back to either role shape silently.
 {{- if and (hasKey $a "syncWindows") (not (kindIs "invalid" $a.syncWindows)) (not (kindIs "slice" $a.syncWindows)) -}}
 {{- fail (printf "argocd.syncWindows must be a list of windows, got %s" (kindOf $a.syncWindows)) -}}
 {{- end -}}
+{{- /* The chart default reaches every tenant, so a bad schedule or duration
+       here would fail every child. The child checks the rest of each window. */ -}}
+{{- range $w := $a.syncWindows | default list -}}
+{{- if not (kindIs "map" $w) -}}
+{{- fail (printf "argocd.syncWindows entries must be objects, got %s" (kindOf $w)) -}}
+{{- end -}}
+{{- $sch := index $w "schedule" -}}
+{{- $dur := index $w "duration" -}}
+{{- if not (and (kindIs "string" $sch) (regexMatch "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$" $sch)) -}}
+{{- fail (printf "argocd.syncWindows: schedule %v must be a cron expression with five fields: minute hour day-of-month month day-of-week" $sch) -}}
+{{- end -}}
+{{- if not (and (kindIs "string" $dur) (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $dur)) -}}
+{{- fail (printf "argocd.syncWindows: duration %v must be a Go duration, such as 8h or 1h30m" $dur) -}}
+{{- end -}}
+{{- end -}}
 {{- $o := $a.orphanedResources | default "off" | toString -}}
 {{- if not (has $o (list "off" "warn" "monitor")) -}}
 {{- fail (printf "argocd.orphanedResources must be one of off, warn, monitor -- got %q" $o) -}}
 {{- end -}}
 {{- end -}}
 
+{{- /*
+Security-relevant values (#6, #7, #13). The schema types them, but it is skippable,
+and a template reads the string "false" as true -- which would grant exec,
+cluster writes or the control-plane destination. An unknown profile must not
+fall back to either role shape silently.
+*/ -}}
 {{- define "mto-extension-argocd.validateSecurityValues" -}}
 {{- $roles := .Values.roles | default dict -}}
 {{- $profile := $roles.profile | default "leastPrivilege" | toString -}}
@@ -275,6 +303,22 @@ fall back to either role shape silently.
 {{- $cp := index (.Values.argocd | default dict) "allowControlPlaneDestination" -}}
 {{- if and (not (kindIs "invalid" $cp)) (not (kindIs "bool" $cp)) -}}
 {{- fail (printf "argocd.allowControlPlaneDestination must be true or false (a boolean), got %s %v" (kindOf $cp) $cp) -}}
+{{- end -}}
+{{- /* #13: a whitelist name that ArgoCD before 3.3 would drop, widening the
+       entry to every object of its kind. The child refuses one from an
+       annotation; a chart default would fail every child, so it is refused
+       here at install time. */ -}}
+{{- $crn := index (.Values.argocd | default dict) "allowClusterResourceNames" -}}
+{{- if and (not (kindIs "invalid" $crn)) (not (kindIs "bool" $crn)) -}}
+{{- fail (printf "argocd.allowClusterResourceNames must be true or false (a boolean), got %s %v" (kindOf $crn) $crn) -}}
+{{- end -}}
+{{- $wlv := (.Values.argocd).clusterResourceWhitelist -}}
+{{- if and (not $crn) (kindIs "slice" $wlv) -}}
+{{- range $i := $wlv -}}
+{{- if and (kindIs "map" $i) (hasKey $i "name") -}}
+{{- fail (printf "argocd.clusterResourceWhitelist entry for kind %v has a name, which needs ArgoCD 3.3+: older ArgoCD drops it and allows every %v. Set argocd.allowClusterResourceNames: true once ArgoCD is 3.3 or later" (index $i "kind") (index $i "kind")) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

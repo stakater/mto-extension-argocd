@@ -61,6 +61,10 @@
             "pattern"
           ]
         },
+        "allowClusterResourceNames": {
+          "type": "boolean",
+          "description": "Allow `name` on clusterResourceWhitelist entries (#13). Set true only on ArgoCD 3.3+: older versions drop the name and allow every object of the kind. Default false."
+        },
         "allowControlPlaneDestination": {
           "type": "boolean",
           "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."
@@ -76,7 +80,8 @@
             "pattern": {
               "type": "string",
               "minLength": 1,
-              "description": "The tenant's Application namespace; {{ tenant }} is expanded. Default {{ tenant }}-argocd."
+              "pattern": "\\{\\{ ?tenant ?\\}\\}",
+              "description": "The tenant's Application namespace; must contain {{ tenant }}, which is expanded, and no globs. Default {{ tenant }}-argocd."
             }
           }
         },
@@ -117,11 +122,13 @@
               },
               "schedule": {
                 "type": "string",
-                "minLength": 1
+                "pattern": "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$",
+                "description": "Cron, exactly five fields: minute hour day-of-month month day-of-week."
               },
               "duration": {
                 "type": "string",
-                "minLength": 1
+                "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                "description": "Go duration, such as 8h or 1h30m."
               },
               "applications": {
                 "type": "array",
@@ -150,6 +157,18 @@
               "timeZone": {
                 "type": "string",
                 "minLength": 1
+              },
+              "andOperator": {
+                "type": "boolean",
+                "description": "Match only when applications, namespaces and clusters all match."
+              },
+              "description": {
+                "type": "string",
+                "description": "ArgoCD 3.1+; older versions drop it."
+              },
+              "syncOverrun": {
+                "type": "boolean",
+                "description": "ArgoCD 3.5+: a sync started before a deny window may finish. Older versions drop it, so the window stays strict."
               }
             }
           }

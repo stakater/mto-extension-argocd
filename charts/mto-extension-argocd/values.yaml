@@ -67,8 +67,10 @@ argocd:
   # namespace cannot be both managed-by and a source namespace without custom
   # roles. The namespace itself comes from the Multi-Tenant Operator (for
   # example namespaces.withTenantPrefix: [argocd]); this chart only writes the
-  # AppProject. A pattern that expands to the ArgoCD namespace or to a
-  # privileged namespace fails that tenant.
+  # AppProject, and lists the namespace only once it exists with the tenant's
+  # label. The pattern must contain {{ tenant }} and expand to a plain name, no
+  # globs. One that expands to the ArgoCD namespace or to a privileged
+  # namespace fails that tenant.
   sourceNamespaces:
     enabled: false
     pattern: "{{ tenant }}-argocd"
@@ -88,9 +90,11 @@ argocd:
     serviceAccount: argocd-deployer
 
   # Sync windows on every tenant's AppProject (#12): when Applications may or
-  # may not sync. Each entry: kind (allow|deny), schedule (cron), duration,
-  # and optionally applications, namespaces, clusters (lists of globs),
-  # manualSync (bool), timeZone. A Tenant may override with the sync-windows
+  # may not sync. Each entry: kind (allow|deny), schedule (cron, exactly five
+  # fields), duration (Go, e.g. 8h), and optionally applications, namespaces,
+  # clusters (lists of globs), manualSync, andOperator (bools), timeZone,
+  # description (3.1+) and syncOverrun (bool, 3.5+; older ArgoCD drops it and
+  # the window stays strict). A Tenant may override with the sync-windows
   # annotation; [] there means none. Empty here: the field is omitted.
   syncWindows: []
 
@@ -110,9 +114,22 @@ argocd:
   # Formerly IntegrationConfig .spec.integrations.argocd.clusterResourceWhitelist
   # (deprecated). On an existing cluster, seed this from the live
   # IntegrationConfig or every tenant's AppProject silently loses the list.
+  #
+  # Every object of a whitelisted kind, cluster-wide: `kind: Namespace` alone
+  # lets a tenant change or delete any namespace (README, "Cluster-scoped
+  # kinds"). With allowClusterResourceNames, an entry may add `name` (a glob,
+  # {{ tenant }} expanded). Use exact names: "{{ tenant }}-*" for acme also
+  # matches acme-corp-prod.
   clusterResourceWhitelist: []
   #  - group: ""
   #    kind: Namespace
+  #    name: "{{ tenant }}-sandbox"
+
+  # Allow `name` on clusterResourceWhitelist entries (#13). ArgoCD before 3.3
+  # drops the field on apply, so a name-restricted entry would allow every
+  # object of its kind; with this false (the default), a name is refused. Set
+  # true only on ArgoCD 3.3 or later.
+  allowClusterResourceNames: false
 
   # Namespaced kinds every tenant's AppProject may NOT manage. Same override and
   # seeding rules as clusterResourceWhitelist.

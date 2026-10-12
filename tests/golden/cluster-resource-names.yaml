@@ -10,7 +10,7 @@ spec:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
-      name: scoped-*
+      name: scoped-sandbox
     - group: rbac.authorization.k8s.io
       kind: ClusterRole
   description: Managed by mto-extension-argocd
@@ -62,7 +62,7 @@ spec:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
-      name: annotated-*
+      name: annotated-sandbox
   description: Managed by mto-extension-argocd
   destinations: []
   roles:

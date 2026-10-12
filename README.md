@@ -183,14 +183,32 @@ Full reference with rationale in
 | `argocd.namespace` | — | **Required.** Where AppProjects are created |
 | `scaffolding.mode` | `OnAnnotation` | `Always`, `OnLabel`, `OnAnnotation`, `Never` |
 | `argocd.sourceRepos.pattern` | `[]` | Per-tenant repo patterns, one sourceRepos entry each; `{{ tenant }}` is expanded |
-| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage; with ArgoCD 3.3+ an entry may add `name` (globs, `{{ tenant }}` expanded), e.g. `{group: "", kind: Namespace, name: "{{ tenant }}-*"}` |
+| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage — read [Cluster-scoped kinds](#cluster-scoped-kinds) first |
 | `argocd.namespaceResourceBlacklist` | `[]` | Namespaced kinds they may not |
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |
+| `argocd.allowClusterResourceNames` | `false` | Allow `name` on whitelist entries. Set it only on ArgoCD 3.3+ |
 | `roles.profile` | `leastPrivilege` | Or `extensionsCompatible`, the legacy shape |
 | `argocd.syncWindows` | `[]` | [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) on every AppProject |
 | `argocd.orphanedResources` | `off` | `warn` or `monitor` to flag resources no Application manages |
 | `roles.exec.enabled` / `roles.clusters.enabled` | `false` | Owner-only exec, cluster writes |
+
+### Cluster-scoped kinds
+
+A whitelisted cluster-scoped kind is allowed for **every** object of that kind
+in the cluster, and the application controller that syncs it is cluster-admin.
+With `{group: "", kind: Namespace}`, a tenant can change or delete any
+namespace — another tenant's, or `kube-system` — and can move a namespace into
+its own destinations by setting its `stakater.com/tenant` label.
+
+Since ArgoCD 3.3 an entry can take a `name` (a glob; `{{ tenant }}` is
+expanded). Older ArgoCD drops the field on apply, which turns the entry back
+into "every object of this kind", so the chart refuses a `name` unless
+`argocd.allowClusterResourceNames: true` confirms 3.3 or later. Use exact
+names. A prefix glob is not tenant-safe: `{{ tenant }}-*` for `acme` is
+`acme-*`, which also matches `acme-corp-prod`. And a tenant that manages its
+own Namespace objects controls their labels, the tenant label and the
+pod-security labels included.
 
 ### Per-tenant overrides
 
@@ -200,10 +218,10 @@ Six settings can be overridden per tenant, as annotations under
 | Annotation | Overrides | Format |
 |---|---|---|
 | `source-repos` | `argocd.sourceRepos.pattern` | JSON array of strings |
-| `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind}` |
+| `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind, name?}` |
 | `namespace-resource-blacklist` | `argocd.namespaceResourceBlacklist` | JSON array of `{group, kind}` |
 | `on-delete-purge` | `onDeletePurgeAppProject` | `"true"` or `"false"` |
-| `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, timeZone?}` |
+| `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, andOperator?, timeZone?, description?, syncOverrun?}`. `schedule` is a five-field cron, `duration` a Go duration such as `8h`; `description` needs ArgoCD 3.1+, `syncOverrun` 3.5+ |
 | `orphaned-resources` | `argocd.orphanedResources` | `off`, `warn` or `monitor` |
 
 An **absent** annotation inherits the chart default. An explicit `[]`
@@ -280,9 +298,21 @@ argocd:
     pattern: "{{ tenant }}-argocd"   # the default
 ```
 
-Every AppProject then carries `sourceNamespaces: [<tenant>-argocd]`. A pattern
-that expands to the ArgoCD namespace, or to a privileged namespace, fails that
-tenant's child and no other.
+Every AppProject then carries `sourceNamespaces: [<tenant>-argocd]`, but only
+once that namespace exists and carries the tenant's label, like a destination.
+Anyone who can write an Application in a source namespace can use the
+AppProject, so it is never a namespace that belongs to someone else.
+
+The pattern must contain `{{ tenant }}` and expand to a plain namespace name.
+ArgoCD reads a glob there, and `{{ tenant }}*` for `acme` would also match
+`acme-corp-argocd`; both are refused at install time. A pattern that expands
+to the ArgoCD namespace, or to a privileged namespace, fails that tenant's
+child and no other.
+
+Kubernetes RBAC on that namespace decides who creates and deletes
+Applications there: a tenant member with `edit` in it can `kubectl apply` one.
+The project roles (edit cannot create or delete, see
+[Security defaults](#security-defaults)) govern only the ArgoCD UI and API.
 
 Applications in any namespace is
 [stable in ArgoCD](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/)
@@ -388,6 +418,13 @@ Also needed, outside this chart:
 1. **A reduced controller ClusterRole** for real damage limitation. Otherwise
    impersonation enforces tenant boundaries at sync time, but the controller
    still holds cluster-admin.
+
+ArgoCD picks the account by the Application's destination namespace, and the
+template above grants it `edit` in that namespace only. Two kinds of
+Application therefore stop syncing: one that carries a cluster-scoped kind from
+`clusterResourceWhitelist`, such as a `Namespace`, and one whose manifests put
+objects into another namespace. Grant those rights to the deployer
+deliberately, or keep such Applications out of tenant projects.
 
 ## Groups named by pattern
 

@@ -285,6 +285,13 @@ e2e-argocd: ## Install ArgoCD. Supplies the AppProject CRD, and proves ArgoCD ho
 	@# the 256KB client-side apply limit.
 	$(KC) apply -n $(E2E_ARGO_NS) --server-side -f $(ARGOCD_URL)
 	$(call wait-crd,appprojects.argoproj.io applications.argoproj.io)
+	@# Applications in any namespace (#9), so TestSourceNamespaces can show
+	@# ArgoCD enforcing the rendered sourceNamespaces. The controller reads this
+	@# only at start, so it is restarted -- but only when the value changed.
+	@if ! $(KC) -n $(E2E_ARGO_NS) patch configmap argocd-cmd-params-cm --type merge \
+		-p '{"data":{"application.namespaces":"*-argocd"}}' | grep -q 'no change'; then \
+		$(KC) -n $(E2E_ARGO_NS) rollout restart statefulset/argocd-application-controller; \
+	fi
 	@# Only the three components the suite actually uses. Waiting on dex,
 	@# notifications and applicationset would add pulls and flakiness for
 	@# nothing.

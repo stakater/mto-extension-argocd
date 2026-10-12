@@ -1,7 +1,9 @@
 # #13: ArgoCD 3.3+ can restrict a cluster-scoped kind by object name (globs).
-# The whitelist keeps `name` when present; without it the entry is unchanged.
+# The whitelist keeps `name` when present, which needs
+# argocd.allowClusterResourceNames; without a name the entry is unchanged.
+# Exact names, not "{{ tenant }}-*": acme-* would also match acme-corp-prod.
 #
-#   scoped     the chart default: Namespaces named after the tenant only, plus
+#   scoped     the chart default: one Namespace named after the tenant, plus
 #              an unrestricted ClusterRole entry (no name).
 #   annotated  its own whitelist with a name, through the annotation.
 #   bad-type   a non-string name: fails this tenant only.
@@ -11,8 +13,9 @@
 values:
   argocd:
     namespace: openshift-gitops
+    allowClusterResourceNames: true
     clusterResourceWhitelist:
-      - { group: "", kind: Namespace, name: "{{ tenant }}-*" }
+      - { group: "", kind: Namespace, name: "{{ tenant }}-sandbox" }
       - { group: rbac.authorization.k8s.io, kind: ClusterRole }
   scaffolding:
     mode: Always
@@ -34,7 +37,7 @@ cluster:
     - metadata:
         name: annotated
         annotations:
-          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: '[{"group":"","kind":"Namespace","name":"annotated-*"}]'
+          argocd.tenantoperator.stakater.com/cluster-resource-whitelist: '[{"group":"","kind":"Namespace","name":"annotated-sandbox"}]'
       spec: {}
     - metadata:
         name: bad-type
