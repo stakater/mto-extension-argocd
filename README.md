@@ -8,6 +8,10 @@ A Helm chart, rendered by [template-operator-v2][tov2]. No operator, no image,
 no OLM bundle. It replaces `ExtensionsArgoCDReconciler` and the `Extensions`
 CRD in [multi-tenant-operator][mto].
 
+> **Design:** requirements, decisions and findings against Argo CD 3.5 are in
+> [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md); the
+> decisions are in [docs/adr/](docs/adr/).
+
 ## Contents
 
 - [What you get](#what-you-get)
