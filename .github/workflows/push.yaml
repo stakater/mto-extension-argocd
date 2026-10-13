@@ -10,12 +10,10 @@ on:
   push:
     branches:
       - main
-    # Mirrors pull_request.yaml. The equivalence test's reference data lives in
-    # tests/render/testdata/ and cannot be regenerated, so nothing here may
-    # cover it.
-    paths-ignore:
-      - '**/*.md'
-      - 'examples/**'
+    # Only a chart change is a release. Any other merge (e.g. a go.mod bump)
+    # would find the version already published and fail main.
+    paths:
+      - 'charts/**'
 
 jobs:
   push-chart:
@@ -23,8 +21,8 @@ jobs:
     # No [skip-ci] escape hatch: a release job must not be skippable by
     # commit-message convention. One [skip-ci] commit in a merged batch would
     # skip the whole publish -- version bumped, nothing shipped, and the Slack
-    # step below only fires on failure(), so nobody would be told. Docs-only
-    # pushes are already excluded by paths-ignore above.
+    # step below only fires on failure(), so nobody would be told. Non-chart
+    # pushes are already excluded by paths above.
     runs-on: ubuntu-latest
     permissions:
       contents: read
