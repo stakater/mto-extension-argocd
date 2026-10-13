@@ -39,6 +39,44 @@ spec:
       value: '{"owner":[],"edit":[],"view":[]}'
     - name: onDeletePurge
       value: {{ .Values.onDeletePurgeAppProject | toString | quote }}
+    {{- /* Set per child by the parent (#6). */}}
+    - name: controlPlaneDestination
+      value: "false"
+    {{- /* #12, set per child by the parent. */}}
+    - name: syncWindowsJson
+      value: "[]"
+    - name: orphanedResources
+      value: "off"
+    {{- /* #9, set per child by the parent. JSON lists, never "" -- an empty
+           string is an unset parameter to template-operator-v2. */}}
+    - name: sourceNamespacesJson
+      value: "[]"
+    - name: sourceNamespacesRefusedJson
+      value: "[]"
+    {{- /* #15, chart-wide; validateImpersonation on the parent has already
+           refused a non-boolean or a non-name. */}}
+    - name: impersonation
+      value: {{ ((.Values.argocd).impersonation).enabled | default false | toString | quote }}
+    - name: impersonationServiceAccount
+      value: {{ ((.Values.argocd).impersonation).serviceAccount | default "argocd-deployer" | quote }}
+    {{- /* #10, chart-wide; validateIdentity on the parent has already refused
+           an unknown mode or a pattern missing either placeholder. */}}
+    - name: identityMode
+      value: {{ (.Values.identity).mode | default "accessControl" | quote }}
+    - name: identityGroupPattern
+      value: {{ (.Values.identity).groupPattern | default "tenant-{{ tenant }}-{{ tier }}" | quote }}
+    {{- /* #13, chart-wide: whether ArgoCD is 3.3+ and keeps `name` on
+           whitelist entries. validateSecurityValues has refused a non-boolean. */}}
+    - name: clusterResourceNames
+      value: {{ (.Values.argocd).allowClusterResourceNames | default false | toString | quote }}
+    {{- /* Chart-wide role shape (#7); validateSecurityValues on the parent
+           has already refused anything else. */}}
+    - name: rolesProfile
+      value: {{ (.Values.roles).profile | default "leastPrivilege" | quote }}
+    - name: rolesExec
+      value: {{ ((.Values.roles).exec).enabled | default false | toString | quote }}
+    - name: rolesClusters
+      value: {{ ((.Values.roles).clusters).enabled | default false | toString | quote }}
   {{- with include "mto-extension-argocd.sync" . }}
   {{- . | nindent 2 }}
   {{- end }}

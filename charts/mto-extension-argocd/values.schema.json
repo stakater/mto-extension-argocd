@@ -38,7 +38,7 @@
           "description": "REQUIRED. Namespace ArgoCD runs in. A blank value does not render zero children -- it renders one per tenant, each emitting an AppProject with an empty namespace that the API server rejects, so every tenant breaks at once. This minLength is the guard."
         },
         "clusterResourceWhitelist": {
-          "$ref": "#/definitions/groupKindList"
+          "$ref": "#/definitions/groupKindNameList"
         },
         "namespaceResourceBlacklist": {
           "$ref": "#/definitions/groupKindList"
@@ -60,6 +60,127 @@
           "required": [
             "pattern"
           ]
+        },
+        "allowClusterResourceNames": {
+          "type": "boolean",
+          "description": "Allow `name` on clusterResourceWhitelist entries (#13). Set true only on ArgoCD 3.3+: older versions drop the name and allow every object of the kind. Default false."
+        },
+        "allowControlPlaneDestination": {
+          "type": "boolean",
+          "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."
+        },
+        "sourceNamespaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Add sourceNamespaces: [<pattern>] to every AppProject (#9). Default false."
+            },
+            "pattern": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\{\\{ ?tenant ?\\}\\}",
+              "description": "The tenant's Application namespace; must contain {{ tenant }}, which is expanded, and no globs. Default {{ tenant }}-argocd."
+            }
+          }
+        },
+        "impersonation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Render destinationServiceAccounts, one per tenant namespace (#15). ArgoCD 3.5+. Default false."
+            },
+            "serviceAccount": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+              "maxLength": 253,
+              "description": "ServiceAccount in each tenant namespace that syncs run as. Default argocd-deployer."
+            }
+          }
+        },
+        "syncWindows": {
+          "type": "array",
+          "description": "Sync windows on every AppProject (#12).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "schedule",
+              "duration"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ]
+              },
+              "schedule": {
+                "type": "string",
+                "pattern": "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$",
+                "description": "Cron, exactly five fields: minute hour day-of-month month day-of-week."
+              },
+              "duration": {
+                "type": "string",
+                "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                "description": "Go duration, such as 8h or 1h30m."
+              },
+              "applications": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "namespaces": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "clusters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "manualSync": {
+                "type": "boolean"
+              },
+              "timeZone": {
+                "type": "string",
+                "minLength": 1
+              },
+              "andOperator": {
+                "type": "boolean",
+                "description": "Match only when applications, namespaces and clusters all match."
+              },
+              "description": {
+                "type": "string",
+                "description": "ArgoCD 3.1+; older versions drop it."
+              },
+              "syncOverrun": {
+                "type": "boolean",
+                "description": "ArgoCD 3.5+: a sync started before a deny window may finish. Older versions drop it, so the window stays strict."
+              }
+            }
+          }
+        },
+        "orphanedResources": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "monitor"
+          ],
+          "description": "Orphaned-resource monitoring (#12). Default off."
         }
       }
     },
@@ -116,7 +237,9 @@
         "sourceRepos",
         "clusterResourceWhitelist",
         "namespaceResourceBlacklist",
-        "onDeletePurge"
+        "onDeletePurge",
+        "syncWindows",
+        "orphanedResources"
       ],
       "properties": {
         "sourceRepos": {
@@ -132,6 +255,14 @@
           "minLength": 1
         },
         "onDeletePurge": {
+          "type": "string",
+          "minLength": 1
+        },
+        "syncWindows": {
+          "type": "string",
+          "minLength": 1
+        },
+        "orphanedResources": {
           "type": "string",
           "minLength": 1
         }
@@ -216,6 +347,60 @@
           }
         }
       }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "leastPrivilege",
+            "extensionsCompatible"
+          ],
+          "description": "leastPrivilege (default, #7) or the legacy extensionsCompatible shape for migration."
+        },
+        "exec": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Grant owner exec create (web terminal as the argocd-server ServiceAccount). Default false."
+            }
+          }
+        },
+        "clusters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Grant owner clusters * (register project-scoped clusters). Default false."
+            }
+          }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "accessControl",
+            "groupPattern",
+            "both"
+          ],
+          "description": "Where role groups come from (#10). Default accessControl."
+        },
+        "groupPattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Group name per role; {{ tenant }} and {{ tier }} (owners, editors, viewers) are required and expanded."
+        }
+      }
     }
   },
   "definitions": {
@@ -235,6 +420,31 @@
           "kind": {
             "type": "string",
             "minLength": 1
+          }
+        }
+      }
+    },
+    "groupKindNameList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group",
+          "kind"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ArgoCD 3.3+: restrict by object name (globs); {{ tenant }} is expanded."
           }
         }
       }

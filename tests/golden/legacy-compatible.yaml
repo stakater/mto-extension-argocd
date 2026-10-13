@@ -1,0 +1,100 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: legacy
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: legacy-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - legacy-owner-group-c544b7
+        - legacy-admins
+      name: legacy-owner
+      policies:
+        - p, proj:legacy:legacy-owner, applications, *, legacy/*, allow
+        - p, proj:legacy:legacy-owner, applicationsets, *, legacy/*, allow
+        - p, proj:legacy:legacy-owner, logs, *, legacy/*, allow
+        - p, proj:legacy:legacy-owner, exec, *, legacy/*, allow
+        - p, proj:legacy:legacy-owner, repositories, *, legacy/*, allow
+        - p, proj:legacy:legacy-owner, clusters, *, legacy/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - legacy-edit-group-cef789
+      name: legacy-edit
+      policies:
+        - p, proj:legacy:legacy-edit, applications, *, legacy/*, allow
+        - p, proj:legacy:legacy-edit, applicationsets, *, legacy/*, allow
+        - p, proj:legacy:legacy-edit, logs, *, legacy/*, allow
+        - p, proj:legacy:legacy-edit, exec, *, legacy/*, allow
+        - p, proj:legacy:legacy-edit, repositories, *, legacy/*, allow
+        - p, proj:legacy:legacy-edit, clusters, *, legacy/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - legacy-view-group-58ee4b
+      name: legacy-view
+      policies:
+        - p, proj:legacy:legacy-view, applications, get, legacy/*, allow
+        - p, proj:legacy:legacy-view, applicationsets, get, legacy/*, allow
+        - p, proj:legacy:legacy-view, logs, get, legacy/*, allow
+        - p, proj:legacy:legacy-view, exec, get, legacy/*, allow
+        - p, proj:legacy:legacy-view, repositories, get, legacy/*, allow
+        - p, proj:legacy:legacy-view, clusters, get, legacy/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: shares-argo-ns
+  namespace: openshift-gitops
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: shares-argo-ns-dev
+      server: https://kubernetes.default.svc
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-owner-group-7f194a
+        - ops@example.com
+      name: shares-argo-ns-owner
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, applications, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, applicationsets, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, logs, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, exec, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, repositories, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-owner, clusters, *, shares-argo-ns/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-edit-group-a20c52
+      name: shares-argo-ns-edit
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applications, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, applicationsets, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, logs, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, exec, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, repositories, *, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-edit, clusters, *, shares-argo-ns/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - shares-argo-ns-view-group-6a5bd7
+      name: shares-argo-ns-view
+      policies:
+        - p, proj:shares-argo-ns:shares-argo-ns-view, applications, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-view, applicationsets, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-view, logs, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-view, exec, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-view, repositories, get, shares-argo-ns/*, allow
+        - p, proj:shares-argo-ns:shares-argo-ns-view, clusters, get, shares-argo-ns/*, allow

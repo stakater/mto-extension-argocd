@@ -37,9 +37,11 @@ func seed(t *testing.T) int64 {
 // The invariants every rendered AppProject must satisfy, whatever the input.
 //
 //  1. exactly three roles, named <tenant>-{owner,edit,view}
-//  2. the ArgoCD namespace is always a destination -- a tenant that cannot
-//     reach it has no working project
-//  3. it appears exactly once, however the namespaces are labelled
+//  2. by default the ArgoCD namespace is never a destination, however the
+//     namespaces are labelled -- deploying into the control plane is a path
+//     to ArgoCD admin (#6)
+//  3. with the legacy opt-in it appears exactly once, as the old controller
+//     rendered it
 //  4. no privileged namespace is ever a destination -- the cross-tenant
 //     exposure invariant
 //  5. every role's first group is the generated one, so the ordering the
@@ -47,15 +49,34 @@ func seed(t *testing.T) int64 {
 //  6. no destination belongs to another tenant
 //  7. every policy names its own role and a resource ArgoCD's API accepts for
 //     a project role -- never `*`, which makes every ArgoCD API write to the
-//     project fail validation
+//     project fail validation -- and the set is the profile's: the
+//     least-privilege table by default (#7), six lines with the legacy one
 //  8. no role lists a group twice and no repo is listed twice, while every
 //     configured group, user and repo is kept, in order. ArgoCD's API refuses
 //     a project with either duplicate, so one would break every ArgoCD API
 //     write to it. The generator overlaps privileged groups, tenant groups
 //     and users, and repeats repos, so the dedup is exercised.
 func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "defaults"
+		if legacy {
+			name = "legacy"
+		}
+		t.Run(name, func(t *testing.T) { checkPropertyInvariants(t, legacy) })
+	}
+}
+
+func checkPropertyInvariants(t *testing.T, legacy bool) {
 	rng := rand.New(rand.NewSource(seed(t)))
 	const argoNS = "argo-cd"
+	values := map[string]any{
+		"argocd":      map[string]any{"namespace": argoNS},
+		"scaffolding": map[string]any{"mode": "Always"},
+	}
+	if legacy {
+		values["argocd"].(map[string]any)["allowControlPlaneDestination"] = true
+		values["roles"] = map[string]any{"profile": "extensionsCompatible"}
+	}
 
 	for i := 0; i < 60; i++ {
 		t.Run(fmt.Sprintf("case-%02d", i), func(t *testing.T) {
@@ -74,10 +95,7 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 			}
 
 			rendered, childErrs := TwoStage(t, Fixture{
-				Values: map[string]any{
-					"argocd":      map[string]any{"namespace": argoNS},
-					"scaffolding": map[string]any{"mode": "Always"},
-				},
+				Values: values,
 				Cluster: map[string]any{
 					"tenants":    tenants,
 					"namespaces": namespaces,
@@ -131,8 +149,15 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 						t.Errorf("%s/%v: first group is %q, want the generated one", name, rm["name"], first)
 					}
 					policies, _ := rm["policies"].([]any)
-					if len(policies) != len(projectScopedResources) {
-						t.Errorf("%s/%v: %d policies, want %d", name, rm["name"], len(policies), len(projectScopedResources))
+					if legacy {
+						if len(policies) != len(projectScopedResources) {
+							t.Errorf("%s/%v: %d policies, want %d", name, rm["name"], len(policies), len(projectScopedResources))
+						}
+					} else {
+						want := leastPrivilegePolicies(name, suffix, false, false)
+						if got := anyStrings(policies); !slices.Equal(got, want) {
+							t.Errorf("%s/%v: policies %v, want %v", name, rm["name"], got, want)
+						}
 					}
 					for _, p := range policies {
 						ps, _ := p.(string)
@@ -165,8 +190,12 @@ func TestPropertyRenderedAppProjectInvariants(t *testing.T) {
 				}
 
 				dests := destinationNames(sp)
-				if n := countOf(dests, argoNS); n != 1 {
-					t.Errorf("%s: ArgoCD namespace appears %d times, want exactly 1: %v", name, n, dests)
+				wantArgo := 0
+				if legacy {
+					wantArgo = 1
+				}
+				if n := countOf(dests, argoNS); n != wantArgo {
+					t.Errorf("%s: ArgoCD namespace appears %d times, want %d: %v", name, n, wantArgo, dests)
 				}
 				for _, d := range dests {
 					if d == argoNS {
@@ -220,6 +249,7 @@ func TestFuzzAnnotationValuesNeverSilentlyCorrupt(t *testing.T) {
 		{"whitelist", "argocd.tenantoperator.stakater.com/cluster-resource-whitelist"},
 		{"blacklist", "argocd.tenantoperator.stakater.com/namespace-resource-blacklist"},
 		{"source-repos", "argocd.tenantoperator.stakater.com/source-repos"},
+		{"sync-windows", "argocd.tenantoperator.stakater.com/sync-windows"},
 	}
 	for i, raw := range hostile {
 		for _, k := range keys {
@@ -408,10 +438,10 @@ func TestScaleManyTenants(t *testing.T) {
 	for _, ap := range docs {
 		name, _ := ap["metadata"].(map[string]any)["name"].(string)
 		sp, _ := ap["spec"].(map[string]any)
-		// The -ci namespace is privileged, so every tenant ends with its three
-		// ordinary namespaces plus the ArgoCD namespace.
-		if got := len(destinationNames(sp)); got != perTenant+1 {
-			t.Errorf("%s: %d destinations, want %d", name, got, perTenant+1)
+		// The -ci namespace is privileged, so every tenant ends with exactly
+		// its three ordinary namespaces -- never the ArgoCD namespace (#6).
+		if got := len(destinationNames(sp)); got != perTenant {
+			t.Errorf("%s: %d destinations, want %d", name, got, perTenant)
 		}
 	}
 	t.Logf("%d tenants, %d namespaces, %d privileged patterns rendered in %s",
@@ -498,6 +528,16 @@ func randName(rng *rand.Rand, n int) string {
 		b[n-1] = 'x'
 	}
 	return string(b)
+}
+
+// anyStrings returns the string entries of a list, in order.
+func anyStrings(list []any) []string {
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		s, _ := v.(string)
+		out = append(out, s)
+	}
+	return out
 }
 
 // anyList returns v as a list, or nil when it is absent.

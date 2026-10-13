@@ -2,22 +2,16 @@
 # normal cluster.
 #
 #   shares-argo-ns  The ArgoCD namespace itself carries this tenant's label and
-#                   is not privileged, so the parent already put it in the
-#                   namespace list. The child appends the ArgoCD namespace
-#                   unconditionally (it must be a destination even when
-#                   privileged), which without a guard lists it twice. A
-#                   duplicate destination is not fatal to ArgoCD, but it churns
-#                   the object on every apply and makes the equivalence diff
-#                   unreadable.
+#                   is not privileged. It is still NOT a destination (#6): a
+#                   tenant that can deploy into the control plane can reach
+#                   ArgoCD admin. With argocd.allowControlPlaneDestination it
+#                   would appear exactly once (legacy-compatible.yaml pins that).
 #
 #   no-namespaces   A tenant with zero labelled namespaces still gets an
-#                   AppProject, with the ArgoCD namespace as its only
-#                   destination. It must NOT be skipped: openbao's parent skips
-#                   namespace-less tenants because its child resolves workloads
-#                   through a namespaceSelector and would fail validation, but
-#                   this chart has no namespaceSelector, and skipping here
-#                   would silently delete a real tenant's AppProject the moment
-#                   its last namespace went away.
+#                   AppProject, now with no destinations at all, rendered as
+#                   `destinations: []` rather than null. It must NOT be
+#                   skipped: skipping would silently remove a real tenant's
+#                   AppProject the moment its last namespace went away.
 #
 #   The empty list also has to survive as JSON: a comma-joined empty list would
 #   be "", which ResolveParameterValue treats as unset and rejects outright.

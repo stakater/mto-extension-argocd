@@ -1,0 +1,147 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: acme
+  namespace: ops-argocd
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: acme-dev
+      server: https://kubernetes.default.svc
+    - namespace: acme-argocd
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-owner-group-c2ef09
+        - acme-admins
+      name: acme-owner
+      policies:
+        - p, proj:acme:acme-owner, applications, *, acme/*, allow
+        - p, proj:acme:acme-owner, applicationsets, *, acme/*, allow
+        - p, proj:acme:acme-owner, logs, get, acme/*, allow
+        - p, proj:acme:acme-owner, repositories, *, acme/*, allow
+        - p, proj:acme:acme-owner, clusters, get, acme/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-edit-group-3d68e6
+      name: acme-edit
+      policies:
+        - p, proj:acme:acme-edit, applications, get, acme/*, allow
+        - p, proj:acme:acme-edit, applications, sync, acme/*, allow
+        - p, proj:acme:acme-edit, applications, update, acme/*, allow
+        - p, proj:acme:acme-edit, applications, update/*, acme/*, allow
+        - p, proj:acme:acme-edit, applications, action/*, acme/*, allow
+        - p, proj:acme:acme-edit, applicationsets, get, acme/*, allow
+        - p, proj:acme:acme-edit, logs, get, acme/*, allow
+        - p, proj:acme:acme-edit, repositories, get, acme/*, allow
+        - p, proj:acme:acme-edit, clusters, get, acme/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - acme-view-group-8ee042
+      name: acme-view
+      policies:
+        - p, proj:acme:acme-view, applications, get, acme/*, allow
+        - p, proj:acme:acme-view, applicationsets, get, acme/*, allow
+        - p, proj:acme:acme-view, logs, get, acme/*, allow
+        - p, proj:acme:acme-view, repositories, get, acme/*, allow
+        - p, proj:acme:acme-view, clusters, get, acme/*, allow
+  sourceNamespaces:
+    - acme-argocd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: beta
+  namespace: ops-argocd
+spec:
+  description: Managed by mto-extension-argocd
+  destinations:
+    - namespace: gamma-argocd
+      server: https://kubernetes.default.svc
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - beta-owner-group-06c4c3
+      name: beta-owner
+      policies:
+        - p, proj:beta:beta-owner, applications, *, beta/*, allow
+        - p, proj:beta:beta-owner, applicationsets, *, beta/*, allow
+        - p, proj:beta:beta-owner, logs, get, beta/*, allow
+        - p, proj:beta:beta-owner, repositories, *, beta/*, allow
+        - p, proj:beta:beta-owner, clusters, get, beta/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - beta-edit-group-fd8bb9
+      name: beta-edit
+      policies:
+        - p, proj:beta:beta-edit, applications, get, beta/*, allow
+        - p, proj:beta:beta-edit, applications, sync, beta/*, allow
+        - p, proj:beta:beta-edit, applications, update, beta/*, allow
+        - p, proj:beta:beta-edit, applications, update/*, beta/*, allow
+        - p, proj:beta:beta-edit, applications, action/*, beta/*, allow
+        - p, proj:beta:beta-edit, applicationsets, get, beta/*, allow
+        - p, proj:beta:beta-edit, logs, get, beta/*, allow
+        - p, proj:beta:beta-edit, repositories, get, beta/*, allow
+        - p, proj:beta:beta-edit, clusters, get, beta/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - beta-view-group-d9b9ae
+      name: beta-view
+      policies:
+        - p, proj:beta:beta-view, applications, get, beta/*, allow
+        - p, proj:beta:beta-view, applicationsets, get, beta/*, allow
+        - p, proj:beta:beta-view, logs, get, beta/*, allow
+        - p, proj:beta:beta-view, repositories, get, beta/*, allow
+        - p, proj:beta:beta-view, clusters, get, beta/*, allow
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  annotations:
+    templates.v2.stakater.com/deletion-policy: Orphan
+  name: gamma
+  namespace: ops-argocd
+spec:
+  description: Managed by mto-extension-argocd
+  destinations: []
+  roles:
+    - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - gamma-owner-group-ad07b0
+      name: gamma-owner
+      policies:
+        - p, proj:gamma:gamma-owner, applications, *, gamma/*, allow
+        - p, proj:gamma:gamma-owner, applicationsets, *, gamma/*, allow
+        - p, proj:gamma:gamma-owner, logs, get, gamma/*, allow
+        - p, proj:gamma:gamma-owner, repositories, *, gamma/*, allow
+        - p, proj:gamma:gamma-owner, clusters, get, gamma/*, allow
+    - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - gamma-edit-group-2a4408
+      name: gamma-edit
+      policies:
+        - p, proj:gamma:gamma-edit, applications, get, gamma/*, allow
+        - p, proj:gamma:gamma-edit, applications, sync, gamma/*, allow
+        - p, proj:gamma:gamma-edit, applications, update, gamma/*, allow
+        - p, proj:gamma:gamma-edit, applications, update/*, gamma/*, allow
+        - p, proj:gamma:gamma-edit, applications, action/*, gamma/*, allow
+        - p, proj:gamma:gamma-edit, applicationsets, get, gamma/*, allow
+        - p, proj:gamma:gamma-edit, logs, get, gamma/*, allow
+        - p, proj:gamma:gamma-edit, repositories, get, gamma/*, allow
+        - p, proj:gamma:gamma-edit, clusters, get, gamma/*, allow
+    - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
+      groups:
+        - gamma-view-group-382db0
+      name: gamma-view
+      policies:
+        - p, proj:gamma:gamma-view, applications, get, gamma/*, allow
+        - p, proj:gamma:gamma-view, applicationsets, get, gamma/*, allow
+        - p, proj:gamma:gamma-view, logs, get, gamma/*, allow
+        - p, proj:gamma:gamma-view, repositories, get, gamma/*, allow
+        - p, proj:gamma:gamma-view, clusters, get, gamma/*, allow

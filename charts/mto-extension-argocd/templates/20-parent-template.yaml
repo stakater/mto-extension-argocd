@@ -32,6 +32,24 @@ spec:
     - name: argoNamespace
       value: {{ .Values.argocd.namespace | quote }}
       exposeInStatus: true
+    {{- include "mto-extension-argocd.validateSecurityValues" . }}
+    {{- /* #6: whether the ArgoCD namespace may be a tenant destination. */}}
+    - name: allowControlPlaneDestination
+      value: {{ (.Values.argocd).allowControlPlaneDestination | default false | toString | quote }}
+    {{- include "mto-extension-argocd.validateSourceNamespaces" . }}
+    {{- include "mto-extension-argocd.validateImpersonation" . }}
+    {{- include "mto-extension-argocd.validateIdentity" . }}
+    {{- include "mto-extension-argocd.validateSyncAndOrphaned" . }}
+    {{- /* #12 chart defaults; a Tenant may override either by annotation. */}}
+    - name: defaultSyncWindowsJson
+      value: {{ (.Values.argocd).syncWindows | default list | toJson | quote }}
+    - name: defaultOrphanedResources
+      value: {{ (.Values.argocd).orphanedResources | default "off" | toString | quote }}
+    {{- /* #9: the tenant's Application namespace. */}}
+    - name: sourceNamespacesEnabled
+      value: {{ ((.Values.argocd).sourceNamespaces).enabled | default false | toString | quote }}
+    - name: sourceNamespacesPattern
+      value: {{ ((.Values.argocd).sourceNamespaces).pattern | default "{{ tenant }}-argocd" | quote }}
     {{- /* Covers tenantNamespaceLabel, both scaffolding keys and the four
            override annotation keys below: an empty key matches nothing, so the
            override it carries is silently ignored. */}}
@@ -67,6 +85,10 @@ spec:
       value: {{ .Values.annotations.namespaceResourceBlacklist | quote }}
     - name: annotationOnDeletePurge
       value: {{ .Values.annotations.onDeletePurge | quote }}
+    - name: annotationSyncWindows
+      value: {{ .Values.annotations.syncWindows | quote }}
+    - name: annotationOrphanedResources
+      value: {{ .Values.annotations.orphanedResources | quote }}
   {{- with include "mto-extension-argocd.sync" . }}
   {{- . | nindent 2 }}
   {{- end }}

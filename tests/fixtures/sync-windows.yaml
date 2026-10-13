@@ -1,0 +1,76 @@
+# #12: per-tenant sync windows and orphaned-resource monitoring, with the same
+# override rules as every other per-tenant setting.
+#
+#   inherits       no annotation: the chart's deny window and `warn`.
+#   overrides      its own allow window and `monitor` (no warnings). The
+#                  window carries andOperator, description and syncOverrun.
+#   empty          an explicit [] and `off`: no windows, no monitoring.
+#   bad-window     kind "maybe": fails this tenant only.
+#   bad-cron       "every night" is not a five-field cron. ArgoCD would block
+#                  every sync in the project; this fails the tenant instead.
+#   bad-duration   "8 hours" is not a Go duration: the same.
+#   bad-orphaned   "yes" is not off/warn/monitor: fails this tenant only.
+
+values:
+  argocd:
+    namespace: openshift-gitops
+    syncWindows:
+      - kind: deny
+        schedule: "0 22 * * *"
+        duration: 8h
+        applications: ["*"]
+        manualSync: true
+    orphanedResources: warn
+  scaffolding:
+    mode: Always
+
+expectChildErrors:
+  mto-argocd-tenant-bad-window: "kind must be allow or deny"
+  mto-argocd-tenant-bad-cron: "must be a cron expression with five fields"
+  mto-argocd-tenant-bad-duration: "must be a Go duration"
+  mto-argocd-tenant-bad-orphaned: "orphaned-resources must be off, warn or monitor"
+
+cluster:
+  integrationConfig:
+    accessControl:
+      privileged:
+        namespaces: []
+        groups: []
+
+  tenants:
+    - metadata: { name: inherits }
+      spec: {}
+    - metadata:
+        name: overrides
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"allow","schedule":"0 9 * * 1-5","duration":"9h","namespaces":["overrides-prod"],"timeZone":"Europe/Stockholm","andOperator":true,"description":"office hours","syncOverrun":true}]'
+          argocd.tenantoperator.stakater.com/orphaned-resources: monitor
+      spec: {}
+    - metadata:
+        name: empty
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: "[]"
+          argocd.tenantoperator.stakater.com/orphaned-resources: "off"
+      spec: {}
+    - metadata:
+        name: bad-window
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"maybe","schedule":"* * * * *","duration":"1h"}]'
+      spec: {}
+    - metadata:
+        name: bad-cron
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"deny","schedule":"every night","duration":"8h"}]'
+      spec: {}
+    - metadata:
+        name: bad-duration
+        annotations:
+          argocd.tenantoperator.stakater.com/sync-windows: '[{"kind":"deny","schedule":"0 22 * * *","duration":"8 hours"}]'
+      spec: {}
+    - metadata:
+        name: bad-orphaned
+        annotations:
+          argocd.tenantoperator.stakater.com/orphaned-resources: "yes"
+      spec: {}
+
+  namespaces: []

@@ -224,11 +224,11 @@ func TestLifecycle(t *testing.T) {
 		if got := spec["description"]; got != "Managed by mto-extension-argocd" {
 			t.Errorf("description = %v", got)
 		}
-		// The ArgoCD namespace is always a destination. On a tenant with
-		// no labelled namespaces it is the ONLY one -- and the tenant must
-		// still get a project rather than be skipped.
-		if !contains(destinations(spec), argoNS) {
-			t.Errorf("ArgoCD namespace missing from destinations: %v", destinations(spec))
+		// The ArgoCD namespace is never a destination by default (#6): a
+		// tenant that can deploy into the control plane can reach ArgoCD
+		// admin.
+		if contains(destinations(spec), argoNS) {
+			t.Errorf("ArgoCD namespace is a destination: %v", destinations(spec))
 		}
 		if roles, _ := spec["roles"].([]any); len(roles) != 3 {
 			t.Errorf("%d roles, want 3", len(roles))

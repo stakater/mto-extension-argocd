@@ -75,12 +75,14 @@ func TestManagedFleet(t *testing.T) {
 		}
 	})
 
-	// A tenant with no namespaces must still get a usable project rather
-	// than be skipped, and the ArgoCD namespace is what makes it usable.
+	// A tenant with no namespaces must still get a project rather than be
+	// skipped -- with no destinations, never the ArgoCD namespace (#6).
 	t.Run("a tenant with no namespaces still gets a project", func(t *testing.T) {
-		got := destinationsOf(t, fixtureTenantEmpty)
-		if len(got) != 1 || got[0] != argoNS {
-			t.Errorf("destinations = %v, want exactly [%s]", got, argoNS)
+		if get(t, gvkAppProject, argoNS, fixtureTenantEmpty) == nil {
+			t.Fatalf("no AppProject for %s", fixtureTenantEmpty)
+		}
+		if got := destinationsOf(t, fixtureTenantEmpty); len(got) != 0 {
+			t.Errorf("destinations = %v, want none", got)
 		}
 	})
 
@@ -108,7 +110,8 @@ func TestManagedFleet(t *testing.T) {
 		// The other tenant must not have moved. Its child is rendered from the
 		// same namespace list, so a filter that ignored the label would show up
 		// here and nowhere else.
-		if got := destinationsOf(t, fixtureTenantEmpty); len(got) != 1 {
+		// It has no namespaces, so no destinations at all (#6).
+		if got := destinationsOf(t, fixtureTenantEmpty); len(got) != 0 {
 			t.Errorf("unrelated tenant's destinations changed: %v", got)
 		}
 
@@ -188,6 +191,21 @@ func TestArgoCDHonoursTheRenderedProject(t *testing.T) {
 		t.Cleanup(func() { deleteApplication(t, name) })
 
 		waitFor(t, "ArgoCD to reject the destination", func() bool {
+			return strings.Contains(appConditions(t, name), "do not match any of the allowed destinations")
+		})
+	})
+
+	// #6, live: ArgoCD itself refuses a tenant Application whose destination
+	// is the control-plane namespace. Before 0.2.0 this was allowed, and the
+	// controller (cluster-admin) would have synced whatever the tenant's
+	// repository held -- AppProjects, Applications, repository Secrets -- into
+	// the ArgoCD namespace.
+	t.Run("an Application targeting the ArgoCD namespace is refused", func(t *testing.T) {
+		name := "e2e-control-plane"
+		createApplication(t, name, tenant, argoNS)
+		t.Cleanup(func() { deleteApplication(t, name) })
+
+		waitFor(t, "ArgoCD to reject the control-plane destination", func() bool {
 			return strings.Contains(appConditions(t, name), "do not match any of the allowed destinations")
 		})
 	})
@@ -418,10 +436,17 @@ func deleteNamespace(t *testing.T, name string) {
 // before and independently of the repo.
 func createApplication(t *testing.T, name, project, namespace string) {
 	t.Helper()
+	createApplicationIn(t, argoNS, name, project, namespace)
+}
+
+// createApplicationIn is createApplication for an Application stored in appNS
+// rather than the ArgoCD namespace -- Applications in any namespace (#9).
+func createApplicationIn(t *testing.T, appNS, name, project, namespace string) {
+	t.Helper()
 	app := &unstructured.Unstructured{}
 	app.SetGroupVersionKind(gvkApplication)
 	app.SetName(name)
-	app.SetNamespace(argoNS)
+	app.SetNamespace(appNS)
 	app.Object["spec"] = map[string]any{
 		"project": project,
 		"source": map[string]any{
@@ -444,10 +469,15 @@ func createApplication(t *testing.T, name, project, namespace string) {
 
 func deleteApplication(t *testing.T, name string) {
 	t.Helper()
+	deleteApplicationIn(t, argoNS, name)
+}
+
+func deleteApplicationIn(t *testing.T, appNS, name string) {
+	t.Helper()
 	app := &unstructured.Unstructured{}
 	app.SetGroupVersionKind(gvkApplication)
 	app.SetName(name)
-	app.SetNamespace(argoNS)
+	app.SetNamespace(appNS)
 	// Logged, not fatal: a failed cleanup here surfaces on the NEXT create as
 	// AlreadyExists, and this line is what explains it.
 	if err := k8s.Delete(context.Background(), app); err != nil && !apierrors.IsNotFound(err) {
@@ -459,7 +489,12 @@ func deleteApplication(t *testing.T, name string) {
 // every assertion here is "does ArgoCD say this anywhere".
 func appConditions(t *testing.T, name string) string {
 	t.Helper()
-	app := get(t, gvkApplication, argoNS, name)
+	return appConditionsIn(t, argoNS, name)
+}
+
+func appConditionsIn(t *testing.T, appNS, name string) string {
+	t.Helper()
+	app := get(t, gvkApplication, appNS, name)
 	if app == nil {
 		return ""
 	}
@@ -477,7 +512,12 @@ func appConditions(t *testing.T, name string) string {
 
 func appSyncStatus(t *testing.T, name string) string {
 	t.Helper()
-	app := get(t, gvkApplication, argoNS, name)
+	return appSyncStatusIn(t, argoNS, name)
+}
+
+func appSyncStatusIn(t *testing.T, appNS, name string) string {
+	t.Helper()
+	app := get(t, gvkApplication, appNS, name)
 	if app == nil {
 		return ""
 	}

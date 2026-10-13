@@ -37,6 +37,13 @@ filtering happens in exactly one place.
 {{- $aWl := .parameters.annotationClusterResourceWhitelist }}
 {{- $aBl := .parameters.annotationNamespaceResourceBlacklist }}
 {{- $aPurge := .parameters.annotationOnDeletePurge }}
+{{- $aSW := .parameters.annotationSyncWindows }}
+{{- $aOR := .parameters.annotationOrphanedResources }}
+{{- /* #6. Off by default: the ArgoCD namespace is never a tenant destination,
+       even when it carries the tenant's label. On, it is the legacy shape. */ -}}
+{{- $allowCP := eq .parameters.allowControlPlaneDestination "true" }}
+{{- $snOn := eq .parameters.sourceNamespacesEnabled "true" }}
+{{- $snPattern := .parameters.sourceNamespacesPattern }}
 {{- /*
 Read the IntegrationConfig shallowly and dig. The parameter resolves the whole
 .spec as a map; a deep jsonPath like .spec.accessControl.privileged fails the
@@ -113,7 +120,7 @@ instead of reaching the actionable failure below.
 {{- if $taken }}
 {{- range $ns := .parameters.namespaces }}
 {{- $owner := dig $nsLabel "" (default dict (index $ns.metadata "labels")) }}
-{{- if and $owner (hasKey $taken $owner) }}
+{{- if and $owner (hasKey $taken $owner) (or $allowCP (ne $ns.metadata.name $argoNs)) }}
 {{- $isPriv := false }}
 {{- /* mustRegexMatch, not regexMatch: the plain form discards the compile
        error, so a typo'd pattern in the cluster's IntegrationConfig silently
@@ -177,6 +184,10 @@ instead of reaching the actionable failure below.
 {{- $wlJson := $defaultWl }}{{- if hasKey $annos $aWl }}{{- $wlJson = index $annos $aWl }}{{- end }}
 {{- $blJson := $defaultBl }}{{- if hasKey $annos $aBl }}{{- $blJson = index $annos $aBl }}{{- end }}
 {{- $purge := $defaultPurge }}{{- if hasKey $annos $aPurge }}{{- $purge = index $annos $aPurge }}{{- end }}
+{{- /* #12, same rules: absent inherits, present is passed verbatim and
+       checked in the child, so a bad value fails one tenant. */ -}}
+{{- $swJson := $.parameters.defaultSyncWindowsJson }}{{- if hasKey $annos $aSW }}{{- $swJson = index $annos $aSW }}{{- end }}
+{{- $or := $.parameters.defaultOrphanedResources }}{{- if hasKey $annos $aOR }}{{- $or = index $annos $aOR }}{{- end }}
 {{- /* sourceRepos has no shareable default: one org-wide value would let every
        tenant deploy from every other tenant's repos. The only safe shared form
        is a pattern templated on the tenant name. A pattern with no placeholder
@@ -231,5 +242,33 @@ spec:
       value: {{ toJson $tu | quote }}
     - name: onDeletePurge
       value: {{ $purge | quote }}
+    - name: controlPlaneDestination
+      value: {{ ternary "true" "false" $allowCP | quote }}
+    - name: syncWindowsJson
+      value: {{ $swJson | quote }}
+    - name: orphanedResources
+      value: {{ $or | quote }}
+{{- /* #9. The tenant's Application namespace, checked here because only the
+       parent sees the privileged patterns. A refusal is passed down, not
+       acted on: the child fails, so one tenant breaks, not the fleet.
+
+       Listed only while it is one of this tenant's own namespaces -- it
+       exists and carries this tenant's label -- exactly like a destination.
+       Whoever can write Applications in a source namespace can use this
+       AppProject, so a namespace that does not exist yet, or that belongs to
+       someone else, must not be listed. When MTO creates it, the Namespace
+       event re-renders the parent and it appears. */ -}}
+{{- $sns := list }}
+{{- $snRefused := list }}
+{{- if $snOn }}
+{{- $sn := replace "{{tenant}}" $name (replace "{{ tenant }}" $name $snPattern) }}
+{{- if eq $sn $argoNs }}{{- $snRefused = append $snRefused (printf "source namespace %q is the ArgoCD namespace: an Application there may reference any AppProject" $sn) }}{{- end }}
+{{- range $p := $privNs }}{{- if mustRegexMatch $p $sn }}{{- $snRefused = append $snRefused (printf "source namespace %q matches privileged pattern %q" $sn $p) }}{{- end }}{{- end }}
+{{- if has $sn $mine }}{{- $sns = list $sn }}{{- end }}
+{{- end }}
+    - name: sourceNamespacesJson
+      value: {{ toJson $sns | quote }}
+    - name: sourceNamespacesRefusedJson
+      value: {{ toJson $snRefused | quote }}
 {{- end }}
 {{- end }}

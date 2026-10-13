@@ -66,6 +66,10 @@ const sourceReposAnnotation = "argocd.tenantoperator.stakater.com/source-repos"
 // the IntegrationConfig's deprecated .spec.integrations.argocd, and that the
 // Extensions CR's sourceRepos carried into the Tenant's source-repos
 // annotation render the same list.
+// The comparison runs with the compatibility values (allowControlPlaneDestination,
+// roles.profile=extensionsCompatible): that is the configuration a migration
+// starts from. The secure defaults differ on purpose; security_test.go pins
+// them.
 func TestEquivalenceWithExtensionsController(t *testing.T) {
 	for _, c := range []string{"plain", "rich"} {
 		t.Run(c, func(t *testing.T) { checkEquivalence(t, filepath.Join("equivalence", c)) })
@@ -120,8 +124,13 @@ func checkEquivalence(t *testing.T, dir string) {
 				// Seeded from the deprecated IntegrationConfig fields.
 				"clusterResourceWhitelist":   argoIntegration["clusterResourceWhitelist"],
 				"namespaceResourceBlacklist": argoIntegration["namespaceResourceBlacklist"],
+				// The legacy controller made the ArgoCD namespace a destination
+				// for every tenant (#6); the chart only does that on request.
+				"allowControlPlaneDestination": true,
 			},
 			"scaffolding": map[string]any{"mode": "Always"},
+			// And its roles were the six-line `*`/`get` shape (#7).
+			"roles": map[string]any{"profile": "extensionsCompatible"},
 		},
 		Cluster: map[string]any{
 			"tenants":           []any{tenant},

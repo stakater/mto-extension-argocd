@@ -38,6 +38,74 @@ argocd:
   # .namespace, which is deprecated.
   namespace: ""
 
+  # Whether the ArgoCD namespace is a destination of every tenant's AppProject.
+  #
+  # false (the default, and the safe value): it never is -- not appended, and
+  # not kept even when the namespace carries a tenant's label. An Application in
+  # the control-plane namespace may reference ANY AppProject, and the
+  # application controller that syncs into it is cluster-admin, so a tenant
+  # that can deploy there can create Applications, AppProjects or repository
+  # and cluster Secrets for every project: ArgoCD admin. See #6 and
+  # https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/
+  #
+  # true: the legacy ExtensionsArgoCDReconciler output, exactly -- appended for
+  # every tenant, even when it matches a privileged pattern. UNSAFE. Only for a
+  # migration that must first reproduce the old AppProjects; move tenants'
+  # Applications out of the control plane (sourceNamespaces) and set it back.
+  allowControlPlaneDestination: false
+
+  # Applications in the tenant's own namespace (#9). When enabled, every
+  # AppProject gets sourceNamespaces: [<pattern>], so the tenant creates its
+  # Applications and ApplicationSets there instead of in the control plane.
+  #
+  # Two gates, and this is only the second: ArgoCD must also watch the
+  # namespace -- `application.namespaces` in argocd-cmd-params-cm (upstream) or
+  # ArgoCD.spec.sourceNamespaces (OpenShift GitOps 1.13+). See README,
+  # "Applications in the tenant's own namespace".
+  #
+  # A dedicated namespace, not every tenant namespace: on OpenShift GitOps a
+  # namespace cannot be both managed-by and a source namespace without custom
+  # roles. The namespace itself comes from the Multi-Tenant Operator (for
+  # example namespaces.withTenantPrefix: [argocd]); this chart only writes the
+  # AppProject, and lists the namespace only once it exists with the tenant's
+  # label. The pattern must contain {{ tenant }} and expand to a plain name, no
+  # globs. One that expands to the ArgoCD namespace or to a privileged
+  # namespace fails that tenant.
+  sourceNamespaces:
+    enabled: false
+    pattern: "{{ tenant }}-argocd"
+
+  # Sync impersonation (#15). When enabled, every AppProject maps each tenant
+  # namespace to `serviceAccount` IN that namespace, so ArgoCD syncs as that
+  # account instead of its own cluster-admin controller. One entry per tenant
+  # namespace and no catch-all: an unmatched destination fails the sync.
+  #
+  # Needs ArgoCD 3.5+ (beta; alpha before) with
+  # application.sync.impersonation.enabled: "true" in argocd-cm, and the
+  # ServiceAccount in every tenant namespace -- a Multi-Tenant Operator
+  # template, see README. Real damage limitation also needs the application
+  # controller's own ClusterRole reduced.
+  impersonation:
+    enabled: false
+    serviceAccount: argocd-deployer
+
+  # Sync windows on every tenant's AppProject (#12): when Applications may or
+  # may not sync. Each entry: kind (allow|deny), schedule (cron, exactly five
+  # fields), duration (Go, e.g. 8h), and optionally applications, namespaces,
+  # clusters (lists of globs), manualSync, andOperator (bools), timeZone,
+  # description (3.1+) and syncOverrun (bool, 3.5+; older ArgoCD drops it and
+  # the window stays strict). A Tenant may override with the sync-windows
+  # annotation; [] there means none. Empty here: the field is omitted.
+  syncWindows: []
+
+  # Orphaned-resource monitoring (#12): resources in a destination namespace
+  # that no Application manages.
+  #   off      omitted (default)
+  #   warn     orphanedResources: {warn: true} -- monitored, with warnings
+  #   monitor  orphanedResources: {warn: false} -- monitored, no warnings
+  # A Tenant may override with the orphaned-resources annotation.
+  orphanedResources: "off"
+
   # Cluster-scoped kinds every tenant's AppProject may manage. Global default;
   # a Tenant may override it with the cluster-resource-whitelist annotation.
   # Empty here and absent on the Tenant means the field is omitted from the
@@ -46,9 +114,22 @@ argocd:
   # Formerly IntegrationConfig .spec.integrations.argocd.clusterResourceWhitelist
   # (deprecated). On an existing cluster, seed this from the live
   # IntegrationConfig or every tenant's AppProject silently loses the list.
+  #
+  # Every object of a whitelisted kind, cluster-wide: `kind: Namespace` alone
+  # lets a tenant change or delete any namespace (README, "Cluster-scoped
+  # kinds"). With allowClusterResourceNames, an entry may add `name` (a glob,
+  # {{ tenant }} expanded). Use exact names: "{{ tenant }}-*" for acme also
+  # matches acme-corp-prod.
   clusterResourceWhitelist: []
   #  - group: ""
   #    kind: Namespace
+  #    name: "{{ tenant }}-sandbox"
+
+  # Allow `name` on clusterResourceWhitelist entries (#13). ArgoCD before 3.3
+  # drops the field on apply, so a name-restricted entry would allow every
+  # object of its kind; with this false (the default), a name is refused. Set
+  # true only on ArgoCD 3.3 or later.
+  allowClusterResourceNames: false
 
   # Namespaced kinds every tenant's AppProject may NOT manage. Same override and
   # seeding rules as clusterResourceWhitelist.
@@ -75,6 +156,57 @@ argocd:
     # against the old controller's output. A Tenant may override with the
     # source-repos annotation.
     pattern: []
+
+# Where each project role's groups come from (#10).
+identity:
+  # accessControl | groupPattern | both
+  #
+  #   accessControl  the default, and the legacy behaviour: the Tenant's
+  #                  owners/editors/viewers groups and users
+  #   groupPattern   one identity-provider group per role, named by
+  #                  groupPattern -- the model the other Stakater extensions
+  #                  use, and the one that survives OpenShift external OIDC,
+  #                  where the MTO-generated group never reaches ArgoCD
+  #   both           accessControl, with the pattern group appended; for
+  #                  moving from one to the other
+  #
+  # The MTO-generated group and the privileged groups are kept in every mode.
+  mode: accessControl
+  # {{ tenant }} and {{ tier }} (owners, editors, viewers) are expanded. Both
+  # are required: without the tenant every tenant shares one group, without
+  # the tier every role does. Prefer a prefix the identity provider controls,
+  # and never a name a local ArgoCD user has -- an SSO group named like a
+  # local user inherits that user's roles.
+  groupPattern: "tenant-{{ tenant }}-{{ tier }}"
+
+# The three project roles (<tenant>-owner, -edit, -view).
+roles:
+  # leastPrivilege | extensionsCompatible
+  #
+  #   leastPrivilege        the default (#7):
+  #                           owner  applications *, applicationsets *, logs get,
+  #                                  repositories *, clusters get
+  #                           edit   applications get, sync, update, update/*,
+  #                                  action/*; applicationsets, logs,
+  #                                  repositories, clusters get
+  #                           view   get on all five
+  #                         Edit cannot create, delete or override Applications.
+  #   extensionsCompatible  the legacy ExtensionsArgoCDReconciler shape: `*` on
+  #                         all six project resources for owner AND edit
+  #                         (exec and cluster writes included), `get` for view.
+  #                         Only for a migration that must first match the old
+  #                         AppProjects.
+  profile: leastPrivilege
+  # ArgoCD's web terminal runs as the argocd-server ServiceAccount, not as the
+  # user -- outside the tenant's own RBAC and audit trail. Off by default; when
+  # on, owner only, and ArgoCD itself also needs exec.enabled in argocd-cm.
+  # Ignored by extensionsCompatible.
+  exec:
+    enabled: false
+  # Registering project-scoped clusters. Off by default (owner gets clusters
+  # get); when on, owner gets clusters *. Ignored by extensionsCompatible.
+  clusters:
+    enabled: false
 
 # Which Tenants get an AppProject.
 scaffolding:
@@ -111,6 +243,8 @@ annotations:
   clusterResourceWhitelist: argocd.tenantoperator.stakater.com/cluster-resource-whitelist
   namespaceResourceBlacklist: argocd.tenantoperator.stakater.com/namespace-resource-blacklist
   onDeletePurge: argocd.tenantoperator.stakater.com/on-delete-purge
+  syncWindows: argocd.tenantoperator.stakater.com/sync-windows
+  orphanedResources: argocd.tenantoperator.stakater.com/orphaned-resources
 
 # The IntegrationConfig the parent reads. Supplies accessControl.privileged
 # only -- privileged namespaces (excluded from every tenant's destinations) and

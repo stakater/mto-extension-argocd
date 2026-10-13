@@ -47,6 +47,13 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
        group and kind are read with `index`, not as fields: from v0.0.8
        template-operator-v2 renders with missingkey=error, and a field read of
        an absent key would fail the child instead of rendering the core group. */ -}}
+{{- /* #13: `name` (ArgoCD 3.3+) on whitelist entries only, a string when present. */ -}}
+{{- range $i := $bl }}
+{{- if hasKey $i "name" }}{{- fail "a name is only supported on clusterResourceWhitelist entries, not namespaceResourceBlacklist" }}{{- end }}
+{{- end }}
+{{- range $i := $wl }}
+{{- if and (hasKey $i "name") (not (kindIs "string" (index $i "name"))) }}{{- fail (printf "clusterResourceWhitelist name must be a string, got %s (%v)" (kindOf (index $i "name")) (index $i "name")) }}{{- end }}
+{{- end }}
 {{- range $i := concat $wl $bl }}
 {{- if and (hasKey $i "group") (not (kindIs "string" (index $i "group"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf (index $i "group")) (index $i "group")) }}{{- end }}
 {{- if and (hasKey $i "kind") (not (kindIs "string" (index $i "kind"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf (index $i "kind")) (index $i "kind")) }}{{- end }}
@@ -70,6 +77,59 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- fail (printf "on-delete-purge must be exactly \"true\" or \"false\", got %q" .parameters.onDeletePurge) }}
 {{- end }}
 {{- $purge := eq .parameters.onDeletePurge "true" }}
+{{- /* Chart-wide and parent-set values; each must be exactly what the chart
+       renders. A near-miss fails this child rather than silently granting. */ -}}
+{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" "clusterResourceNames" }}
+{{- if not (has (index $.parameters $p) (list "true" "false")) }}
+{{- fail (printf "%s must be exactly \"true\" or \"false\", got %q" $p (index $.parameters $p)) }}
+{{- end }}
+{{- end }}
+{{- /* #13. Before ArgoCD 3.3 the AppProject CRD has no `name` on these entries,
+       and the API server drops the field on apply: a name-restricted entry
+       would then allow EVERY object of its kind. So a name is refused unless
+       the platform confirms ArgoCD 3.3+ with argocd.allowClusterResourceNames. */ -}}
+{{- if ne .parameters.clusterResourceNames "true" }}
+{{- range $i := $wl }}
+{{- if hasKey $i "name" }}{{- fail (printf "clusterResourceWhitelist entry for kind %v has a name, which needs ArgoCD 3.3+: older ArgoCD drops it and allows every %v. Set argocd.allowClusterResourceNames: true once ArgoCD is 3.3 or later" (index $i "kind") (index $i "kind")) }}{{- end }}
+{{- end }}
+{{- end }}
+{{- if not (has .parameters.rolesProfile (list "leastPrivilege" "extensionsCompatible")) }}
+{{- fail (printf "rolesProfile must be leastPrivilege or extensionsCompatible, got %q" .parameters.rolesProfile) }}
+{{- end }}
+{{- $cp := eq .parameters.controlPlaneDestination "true" }}
+{{- $impersonate := eq .parameters.impersonation "true" }}
+{{- if not (has .parameters.identityMode (list "accessControl" "groupPattern" "both")) }}
+{{- fail (printf "identityMode must be accessControl, groupPattern or both, got %q" .parameters.identityMode) }}
+{{- end }}
+{{- $useACL := ne .parameters.identityMode "groupPattern" }}
+{{- $usePattern := ne .parameters.identityMode "accessControl" }}
+{{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
+{{- /* #12. Every window is checked field by field and rendered field by field:
+       a value that would apply cleanly but mean something else must fail
+       this tenant instead. */ -}}
+{{- if not (has .parameters.orphanedResources (list "off" "warn" "monitor")) }}
+{{- fail (printf "orphaned-resources must be off, warn or monitor, got %q" .parameters.orphanedResources) }}
+{{- end }}
+{{- $sw := mustFromJson .parameters.syncWindowsJson }}
+{{- if not (kindIs "slice" $sw) }}{{- fail (printf "sync-windows must be a JSON list, got %s" (kindOf $sw)) }}{{- end }}
+{{- range $w := $sw }}
+{{- if not (kindIs "map" $w) }}{{- fail (printf "sync-windows entries must be objects, got %s" (kindOf $w)) }}{{- end }}
+{{- range $k, $_ := $w }}{{- if not (has $k (list "kind" "schedule" "duration" "applications" "namespaces" "clusters" "manualSync" "timeZone" "andOperator" "description" "syncOverrun")) }}{{- fail (printf "sync-windows: unknown field %q" $k) }}{{- end }}{{- end }}
+{{- if not (has (index $w "kind") (list "allow" "deny")) }}{{- fail (printf "sync-windows: kind must be allow or deny, got %v" (index $w "kind")) }}{{- end }}
+{{- range $k := list "schedule" "duration" }}{{- if or (not (kindIs "string" (index $w $k))) (eq (index $w $k) "") }}{{- fail (printf "sync-windows: %s must be a non-empty string" $k) }}{{- end }}{{- end }}
+{{- /* ArgoCD parses these only when it evaluates the window, and a bad one
+       blocks every sync in the project ("invalid sync windows"). Its parser
+       takes exactly five cron fields, no @daily, and a Go duration. */ -}}
+{{- if not (regexMatch "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$" (index $w "schedule")) }}{{- fail (printf "sync-windows: schedule %q must be a cron expression with five fields: minute hour day-of-month month day-of-week" (index $w "schedule")) }}{{- end }}
+{{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" (index $w "duration")) }}{{- fail (printf "sync-windows: duration %q must be a Go duration, such as 8h or 1h30m" (index $w "duration")) }}{{- end }}
+{{- range $k := list "timeZone" "description" }}{{- if and (hasKey $w $k) (not (kindIs "string" (index $w $k))) }}{{- fail (printf "sync-windows: %s must be a string" $k) }}{{- end }}{{- end }}
+{{- range $k := list "manualSync" "andOperator" "syncOverrun" }}{{- if and (hasKey $w $k) (not (kindIs "bool" (index $w $k))) }}{{- fail (printf "sync-windows: %s must be true or false" $k) }}{{- end }}{{- end }}
+{{- range $k := list "applications" "namespaces" "clusters" }}{{- if hasKey $w $k }}{{- if not (kindIs "slice" (index $w $k)) }}{{- fail (printf "sync-windows: %s must be a list" $k) }}{{- end }}{{- range $s := index $w $k }}{{- if not (kindIs "string" $s) }}{{- fail (printf "sync-windows: %s entries must be strings" $k) }}{{- end }}{{- end }}{{- end }}{{- end }}
+{{- end }}
+{{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
+{{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
+{{- $exec := eq .parameters.rolesExec "true" }}
+{{- $clusters := eq .parameters.rolesClusters "true" }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -87,26 +147,84 @@ spec:
     - {{ $r | quote }}
   {{- end }}
   {{- end }}
+  {{- if $sns }}
+  sourceNamespaces:
+  {{- range $s := $sns }}
+    - {{ $s | quote }}
+  {{- end }}
+  {{- end }}
+  {{- /* The ArgoCD namespace is NOT a destination unless the platform opts in
+         (#6). It does not need to be one: the AppProject lives there whatever
+         `destinations` says, and destinations only limit where Applications
+         deploy. As a destination it is a path to ArgoCD admin -- an
+         Application in the control-plane namespace may reference any
+         AppProject, and the controller syncing into it is cluster-admin.
+
+         With the opt-in it is the legacy shape exactly: appended even when it
+         matches a privileged pattern, and guarded against listing it twice
+         when the parent already put it in namespacesJson (labelled for this
+         tenant and not privileged). */}}
+  {{- $dests := $nsList }}
+  {{- if and $cp (not (has $argoNs $nsList)) }}{{- $dests = append $nsList $argoNs }}{{- end }}
+  {{- if $dests }}
   destinations:
-  {{- range $ns := $nsList }}
+  {{- range $ns := $dests }}
     - namespace: {{ $ns | quote }}
       server: https://kubernetes.default.svc
   {{- end }}
-  {{- /* The ArgoCD namespace is always a destination, even when it matches a
-         privileged pattern -- ArgoCD itself needs it to manage the project.
-
-         Guarded against listing it twice: if the ArgoCD namespace also carries
-         the tenant label and is not privileged, the parent already put it in
-         namespacesJson. */}}
-  {{- if not (has $argoNs $nsList) }}
-    - namespace: {{ $argoNs | quote }}
-      server: https://kubernetes.default.svc
+  {{- else }}
+  destinations: []
+  {{- end }}
+  {{- /* #15. One entry per tenant namespace -- $nsList, not $dests, so the
+         ArgoCD namespace never gets one even when it is a destination: there
+         is no tenant deployer in it. No catch-all: an unmatched destination
+         must fail the sync rather than fall back to the controller. */}}
+  {{- if and $impersonate $nsList }}
+  destinationServiceAccounts:
+  {{- range $ns := $nsList }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ $ns | quote }}
+      defaultServiceAccount: {{ $.parameters.impersonationServiceAccount | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if $sw }}
+  syncWindows:
+  {{- range $w := $sw }}
+    - kind: {{ index $w "kind" | quote }}
+      schedule: {{ index $w "schedule" | quote }}
+      duration: {{ index $w "duration" | quote }}
+      {{- range $k := list "applications" "namespaces" "clusters" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}:
+      {{- range $s := index $w $k }}
+        - {{ $s | quote }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- range $k := list "manualSync" "andOperator" "syncOverrun" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}: {{ index $w $k }}
+      {{- end }}
+      {{- end }}
+      {{- range $k := list "timeZone" "description" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}: {{ index $w $k | quote }}
+      {{- end }}
+      {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- if ne .parameters.orphanedResources "off" }}
+  orphanedResources:
+    warn: {{ eq .parameters.orphanedResources "warn" }}
   {{- end }}
   {{- if $wl }}
   clusterResourceWhitelist:
   {{- range $i := $wl }}
     - group: {{ (index $i "group") | quote }}
       kind: {{ (index $i "kind") | quote }}
+      {{- if hasKey $i "name" }}
+      name: {{ index $i "name" | replace "{{tenant}}" $t | replace "{{ tenant }}" $t | quote }}
+      {{- end }}
   {{- end }}
   {{- end }}
   {{- if $bl }}
@@ -120,21 +238,36 @@ spec:
   {{- range $role := list "owner" "edit" "view" }}
   {{- /* Go's hex(sha256("<tenant>-<role>"))[:6]. Reproduced exactly by sprig. */}}
   {{- $hash := sha256sum (printf "%s-%s" $t $role) | trunc 6 }}
+  {{- /* Policy rules as resource/action pairs. #7: least privilege by default;
+         the legacy six-line `*`/`get` shape only with extensionsCompatible. */}}
+  {{- $rules := list }}
+  {{- if $legacyRoles }}
   {{- $verb := ternary "get" "*" (eq $role "view") }}
+  {{- range $res := list "applications" "applicationsets" "logs" "exec" "repositories" "clusters" }}
+  {{- $rules = append $rules (list $res $verb) }}
+  {{- end }}
+  {{- else if eq $role "owner" }}
+  {{- $rules = list (list "applications" "*") (list "applicationsets" "*") (list "logs" "get") }}
+  {{- if $exec }}{{- $rules = append $rules (list "exec" "create") }}{{- end }}
+  {{- $rules = append $rules (list "repositories" "*") }}
+  {{- $rules = append $rules (list "clusters" (ternary "*" "get" $clusters)) }}
+  {{- else if eq $role "edit" }}
+  {{- /* No create, delete or override: edit syncs and updates what exists. */}}
+  {{- $rules = list (list "applications" "get") (list "applications" "sync") (list "applications" "update") (list "applications" "update/*") (list "applications" "action/*") (list "applicationsets" "get") (list "logs" "get") (list "repositories" "get") (list "clusters" "get") }}
+  {{- else }}
+  {{- $rules = list (list "applications" "get") (list "applicationsets" "get") (list "logs" "get") (list "repositories" "get") (list "clusters" "get") }}
+  {{- end }}
     - name: {{ printf "%s-%s" $t $role | quote }}
       description: >-
         Role that gives {{ if eq $role "owner" }}full{{ else }}{{ $role }}{{ end }} access to all
         resources inside the tenant's namespace to the tenant owner group
-      {{- /* One line per project-scoped resource, not `*`. ArgoCD's API
-             validation refuses `*` as the resource of a project role policy,
-             so with `*` every write through the ArgoCD API -- create-token,
-             delete-token, the UI -- fails with "project resource must be:
-             ...". At runtime `*` and these six lines grant the same access:
-             verified on ArgoCD 3.4.6 with can-i over every resource and
-             action, for an owner and a viewer. */}}
+      {{- /* One line per resource/action, never `*` as the resource: ArgoCD's
+             API refuses it in a project role policy, so every write through
+             the ArgoCD API -- create-token, delete-token, the UI -- would fail
+             with "project resource must be: ...". */}}
       policies:
-      {{- range $res := list "applications" "applicationsets" "logs" "exec" "repositories" "clusters" }}
-        - {{ printf "p, proj:%s:%s-%s, %s, %s, %s/*, allow" $t $t $role $res $verb $t | quote }}
+      {{- range $r := $rules }}
+        - {{ printf "p, proj:%s:%s-%s, %s, %s, %s/*, allow" $t $t $role (index $r 0) (index $r 1) $t | quote }}
       {{- end }}
       {{- /* Order is load-bearing for the equivalence diff: generated group,
              then the IntegrationConfig's privileged groups, then the tenant's
@@ -163,7 +296,16 @@ spec:
              above holds. ArgoCD's API refuses a role that lists a group twice
              ("group ... already exists for role"), and a privileged group
              that a tenant also lists is ordinary configuration. */}}
-      {{- $groups := concat (list (printf "%s-%s-group-%s" $t $role $hash)) ($priv | default list) (index $tg $role | default list) (index $tu $role | default list) | mustUniq }}
+      {{- /* #10: the Tenant's lists, the pattern group, or both -- the
+             generated and privileged groups lead in every mode. */}}
+      {{- $own := list }}
+      {{- if $useACL }}{{- $own = concat (index $tg $role | default list) (index $tu $role | default list) }}{{- end }}
+      {{- if $usePattern }}
+      {{- $tier := index (dict "owner" "owners" "edit" "editors" "view" "viewers") $role }}
+      {{- $pg := $.parameters.identityGroupPattern | replace "{{tenant}}" $t | replace "{{ tenant }}" $t | replace "{{tier}}" $tier | replace "{{ tier }}" $tier }}
+      {{- $own = append $own $pg }}
+      {{- end }}
+      {{- $groups := concat (list (printf "%s-%s-group-%s" $t $role $hash)) ($priv | default list) $own | mustUniq }}
       groups:
       {{- range $g := $groups }}
         - {{ $g | quote }}

@@ -13,8 +13,6 @@ spec:
       server: https://kubernetes.default.svc
     - namespace: tenant-a-prod
       server: https://kubernetes.default.svc
-    - namespace: openshift-gitops
-      server: https://kubernetes.default.svc
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -26,10 +24,9 @@ spec:
       policies:
         - p, proj:tenant-a:tenant-a-owner, applications, *, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-owner, applicationsets, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-owner, logs, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-owner, exec, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, logs, get, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-owner, repositories, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-owner, clusters, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-owner, clusters, get, tenant-a/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - tenant-a-edit-group-35f088
@@ -37,12 +34,15 @@ spec:
         - tenant-a-editors
       name: tenant-a-edit
       policies:
-        - p, proj:tenant-a:tenant-a-edit, applications, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-edit, applicationsets, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-edit, logs, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-edit, exec, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-edit, repositories, *, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-edit, clusters, *, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applications, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applications, sync, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applications, update, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applications, update/*, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applications, action/*, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, applicationsets, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, logs, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, repositories, get, tenant-a/*, allow
+        - p, proj:tenant-a:tenant-a-edit, clusters, get, tenant-a/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - tenant-a-view-group-883af2
@@ -53,7 +53,6 @@ spec:
         - p, proj:tenant-a:tenant-a-view, applications, get, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-view, applicationsets, get, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-view, logs, get, tenant-a/*, allow
-        - p, proj:tenant-a:tenant-a-view, exec, get, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-view, repositories, get, tenant-a/*, allow
         - p, proj:tenant-a:tenant-a-view, clusters, get, tenant-a/*, allow
 ---
@@ -69,8 +68,6 @@ spec:
   destinations:
     - namespace: tenant-b-dev
       server: https://kubernetes.default.svc
-    - namespace: openshift-gitops
-      server: https://kubernetes.default.svc
   roles:
     - description: Role that gives full access to all resources inside the tenant's namespace to the tenant owner group
       groups:
@@ -81,22 +78,24 @@ spec:
       policies:
         - p, proj:tenant-b:tenant-b-owner, applications, *, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-owner, applicationsets, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-owner, logs, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-owner, exec, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, logs, get, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-owner, repositories, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-owner, clusters, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-owner, clusters, get, tenant-b/*, allow
     - description: Role that gives edit access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - tenant-b-edit-group-50762d
         - system-admins
       name: tenant-b-edit
       policies:
-        - p, proj:tenant-b:tenant-b-edit, applications, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-edit, applicationsets, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-edit, logs, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-edit, exec, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-edit, repositories, *, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-edit, clusters, *, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applications, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applications, sync, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applications, update, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applications, update/*, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applications, action/*, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, applicationsets, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, logs, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, repositories, get, tenant-b/*, allow
+        - p, proj:tenant-b:tenant-b-edit, clusters, get, tenant-b/*, allow
     - description: Role that gives view access to all resources inside the tenant's namespace to the tenant owner group
       groups:
         - tenant-b-view-group-fea1db
@@ -106,6 +105,5 @@ spec:
         - p, proj:tenant-b:tenant-b-view, applications, get, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-view, applicationsets, get, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-view, logs, get, tenant-b/*, allow
-        - p, proj:tenant-b:tenant-b-view, exec, get, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-view, repositories, get, tenant-b/*, allow
         - p, proj:tenant-b:tenant-b-view, clusters, get, tenant-b/*, allow

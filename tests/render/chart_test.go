@@ -120,6 +120,89 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 			wantErr: "not a valid Kubernetes label"},
 		// The override keys and the opt-in key share the Tenant annotation map;
 		// a duplicate makes the opt-in marker and an override read each other.
+		// #9. A string "false" would turn source namespaces on.
+		{name: "non-boolean argocd.sourceNamespaces.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.enabled": `"false"`},
+			wantErr: "argocd.sourceNamespaces.enabled must be true or false"},
+		{name: "empty argocd.sourceNamespaces.pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": ""},
+			wantErr: "argocd.sourceNamespaces.pattern must be a non-empty string"},
+		// Without {{ tenant }} every AppProject lists the same namespace; a
+		// glob matches other tenants' namespaces. Both are cross-tenant.
+		{name: "sourceNamespaces pattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "shared-apps"},
+			wantErr: "argocd.sourceNamespaces.pattern must contain {{ tenant }}"},
+		{name: "sourceNamespaces glob pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}*"`},
+			wantErr: "must expand to a plain namespace name"},
+		{name: "unrecognised sourceNamespaces placeholder",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}-${env}"`},
+			wantErr: "unrecognised placeholder"},
+		// #15. A string "false" would turn impersonation on.
+		{name: "non-boolean argocd.impersonation.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.impersonation.enabled": `"false"`},
+			wantErr: "argocd.impersonation.enabled must be true or false"},
+		// A glob here would be a catch-all in disguise; an invalid name never
+		// matches and every sync fails.
+		{name: "invalid argocd.impersonation.serviceAccount",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.impersonation.serviceAccount": "*"},
+			wantErr: "argocd.impersonation.serviceAccount must be a ServiceAccount name"},
+		// #10. Without {{ tenant }} every tenant gets the same group:
+		// cross-tenant access. Without {{ tier }} viewers get the owner group.
+		{name: "invalid identity.mode",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.mode": "groups"},
+			wantErr: "identity.mode must be one of accessControl, groupPattern, both"},
+		{name: "identity.groupPattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.groupPattern": "argocd-{{ tier }}"},
+			wantErr: "identity.groupPattern must contain {{ tenant }}"},
+		{name: "identity.groupPattern without the tier",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "identity.groupPattern": "tenant-{{ tenant }}"},
+			wantErr: "identity.groupPattern must contain {{ tier }}"},
+		// #12.
+		{name: "invalid argocd.orphanedResources",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.orphanedResources": "yes"},
+			wantErr: "argocd.orphanedResources must be one of off, warn, monitor"},
+		{name: "non-list argocd.syncWindows",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":"nightly"}`},
+			wantErr: "argocd.syncWindows must be a list"},
+		// The default reaches every tenant: a bad schedule or duration there
+		// would fail every child, so it is refused at install time.
+		{name: "argocd.syncWindows default with a bad cron",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":[{"kind":"deny","schedule":"every night","duration":"8h"}]}`},
+			wantErr: "must be a cron expression with five fields"},
+		{name: "argocd.syncWindows default with a bad duration",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":[{"kind":"deny","schedule":"0 22 * * *","duration":"8 hours"}]}`},
+			wantErr: "must be a Go duration"},
+		// #13. ArgoCD before 3.3 drops a whitelist name and allows every object
+		// of the kind, so a name needs the explicit 3.3+ confirmation.
+		{name: "non-boolean argocd.allowClusterResourceNames",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.allowClusterResourceNames": `"true"`},
+			wantErr: "argocd.allowClusterResourceNames must be true or false"},
+		{name: "a whitelist name without allowClusterResourceNames",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","clusterResourceWhitelist":[{"group":"","kind":"Namespace","name":"x"}]}`},
+			wantErr: "needs ArgoCD 3.3+"},
+		// An unrecognised profile must not fall back to either shape silently.
+		{name: "invalid roles.profile",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},
+			wantErr: "roles.profile must be one of leastPrivilege, extensionsCompatible"},
+		// A string "false" is truthy in a template: it would grant exec.
+		{name: "non-boolean roles.exec.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"roles.exec.enabled": `"false"`},
+			wantErr: "roles.exec.enabled must be true or false"},
+		{name: "non-boolean roles.clusters.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"roles.clusters.enabled": `"false"`},
+			wantErr: "roles.clusters.enabled must be true or false"},
+		{name: "non-boolean argocd.allowControlPlaneDestination",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.allowControlPlaneDestination": `"false"`},
+			wantErr: "argocd.allowControlPlaneDestination must be true or false"},
 		{name: "colliding annotation keys",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "annotations.onDeletePurge": "argocd.tenantoperator.stakater.com/enabled"},
 			wantErr: "annotation keys collide"},
@@ -128,7 +211,7 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 	// including on-delete-purge -- is silently ignored and the chart default
 	// silently wins. Nothing would ever error. All four keys, so dropping one
 	// from the validateOverrideKeys range list is caught.
-	for _, key := range []string{"sourceRepos", "clusterResourceWhitelist", "namespaceResourceBlacklist", "onDeletePurge"} {
+	for _, key := range []string{"sourceRepos", "clusterResourceWhitelist", "namespaceResourceBlacklist", "onDeletePurge", "syncWindows", "orphanedResources"} {
 		cases = append(cases, struct {
 			name    string
 			sets    map[string]string
