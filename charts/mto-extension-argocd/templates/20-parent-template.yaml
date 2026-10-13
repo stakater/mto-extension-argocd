@@ -38,6 +38,7 @@ spec:
       value: {{ (.Values.argocd).allowControlPlaneDestination | default false | toString | quote }}
     {{- include "mto-extension-argocd.validateSourceNamespaces" . }}
     {{- include "mto-extension-argocd.validateImpersonation" . }}
+    {{- include "mto-extension-argocd.validateIdentity" . }}
     {{- /* #9: the tenant's Application namespace. */}}
     - name: sourceNamespacesEnabled
       value: {{ ((.Values.argocd).sourceNamespaces).enabled | default false | toString | quote }}

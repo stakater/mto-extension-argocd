@@ -286,6 +286,26 @@
           }
         }
       }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "accessControl",
+            "groupPattern",
+            "both"
+          ],
+          "description": "Where role groups come from (#10). Default accessControl."
+        },
+        "groupPattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Group name per role; {{ tenant }} and {{ tier }} (owners, editors, viewers) are required and expanded."
+        }
+      }
     }
   },
   "definitions": {

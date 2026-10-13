@@ -234,6 +234,28 @@ Application there may use another tenant's AppProject.
 {{- end -}}
 {{- end -}}
 
+{{- define "mto-extension-argocd.validateIdentity" -}}
+{{- $id := .Values.identity | default dict -}}
+{{- $mode := $id.mode | default "accessControl" | toString -}}
+{{- if not (has $mode (list "accessControl" "groupPattern" "both")) -}}
+{{- fail (printf "identity.mode must be one of accessControl, groupPattern, both -- got %q" $mode) -}}
+{{- end -}}
+{{- $p := $id.groupPattern | default "tenant-{{ tenant }}-{{ tier }}" | toString -}}
+{{- $norm := replace "{{tenant}}" "{{ tenant }}" (replace "{{tier}}" "{{ tier }}" $p) -}}
+{{- if not (contains "{{ tenant }}" $norm) -}}
+{{- fail (printf "identity.groupPattern must contain {{ tenant }}, got %q: without it every tenant gets the same group" $p) -}}
+{{- end -}}
+{{- if not (contains "{{ tier }}" $norm) -}}
+{{- fail (printf "identity.groupPattern must contain {{ tier }}, got %q: without it every role gets the same group" $p) -}}
+{{- end -}}
+{{- $expanded := replace "{{ tier }}" "x" (replace "{{ tenant }}" "x" $norm) -}}
+{{- range $residue := list "{{" "${" "$(" "%s" -}}
+{{- if contains $residue $expanded -}}
+{{- fail (printf "identity.groupPattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{ tier }} are substituted" $p $residue) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /*
 Security-relevant values (#6, #7). The schema types them, but it is skippable,
 and a template reads the string "false" as true -- which would grant exec,

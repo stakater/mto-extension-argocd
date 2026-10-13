@@ -127,6 +127,28 @@ argocd:
     # source-repos annotation.
     pattern: []
 
+# Where each project role's groups come from (#10).
+identity:
+  # accessControl | groupPattern | both
+  #
+  #   accessControl  the default, and the legacy behaviour: the Tenant's
+  #                  owners/editors/viewers groups and users
+  #   groupPattern   one identity-provider group per role, named by
+  #                  groupPattern -- the model the other Stakater extensions
+  #                  use, and the one that survives OpenShift external OIDC,
+  #                  where the MTO-generated group never reaches ArgoCD
+  #   both           accessControl, with the pattern group appended; for
+  #                  moving from one to the other
+  #
+  # The MTO-generated group and the privileged groups are kept in every mode.
+  mode: accessControl
+  # {{ tenant }} and {{ tier }} (owners, editors, viewers) are expanded. Both
+  # are required: without the tenant every tenant shares one group, without
+  # the tier every role does. Prefer a prefix the identity provider controls,
+  # and never a name a local ArgoCD user has -- an SSO group named like a
+  # local user inherits that user's roles.
+  groupPattern: "tenant-{{ tenant }}-{{ tier }}"
+
 # The three project roles (<tenant>-owner, -edit, -view).
 roles:
   # leastPrivilege | extensionsCompatible

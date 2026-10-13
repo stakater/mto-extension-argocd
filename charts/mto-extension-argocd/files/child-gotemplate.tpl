@@ -82,6 +82,11 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- end }}
 {{- $cp := eq .parameters.controlPlaneDestination "true" }}
 {{- $impersonate := eq .parameters.impersonation "true" }}
+{{- if not (has .parameters.identityMode (list "accessControl" "groupPattern" "both")) }}
+{{- fail (printf "identityMode must be accessControl, groupPattern or both, got %q" .parameters.identityMode) }}
+{{- end }}
+{{- $useACL := ne .parameters.identityMode "groupPattern" }}
+{{- $usePattern := ne .parameters.identityMode "accessControl" }}
 {{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
 {{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
 {{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
@@ -220,7 +225,16 @@ spec:
              above holds. ArgoCD's API refuses a role that lists a group twice
              ("group ... already exists for role"), and a privileged group
              that a tenant also lists is ordinary configuration. */}}
-      {{- $groups := concat (list (printf "%s-%s-group-%s" $t $role $hash)) ($priv | default list) (index $tg $role | default list) (index $tu $role | default list) | mustUniq }}
+      {{- /* #10: the Tenant's lists, the pattern group, or both -- the
+             generated and privileged groups lead in every mode. */}}
+      {{- $own := list }}
+      {{- if $useACL }}{{- $own = concat (index $tg $role | default list) (index $tu $role | default list) }}{{- end }}
+      {{- if $usePattern }}
+      {{- $tier := index (dict "owner" "owners" "edit" "editors" "view" "viewers") $role }}
+      {{- $pg := $.parameters.identityGroupPattern | replace "{{tenant}}" $t | replace "{{ tenant }}" $t | replace "{{tier}}" $tier | replace "{{ tier }}" $tier }}
+      {{- $own = append $own $pg }}
+      {{- end }}
+      {{- $groups := concat (list (printf "%s-%s-group-%s" $t $role $hash)) ($priv | default list) $own | mustUniq }}
       groups:
       {{- range $g := $groups }}
         - {{ $g | quote }}
