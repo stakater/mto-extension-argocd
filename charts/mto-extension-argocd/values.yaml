@@ -114,9 +114,22 @@ argocd:
   # Formerly IntegrationConfig .spec.integrations.argocd.clusterResourceWhitelist
   # (deprecated). On an existing cluster, seed this from the live
   # IntegrationConfig or every tenant's AppProject silently loses the list.
+  #
+  # Every object of a whitelisted kind, cluster-wide: `kind: Namespace` alone
+  # lets a tenant change or delete any namespace (README, "Cluster-scoped
+  # kinds"). With allowClusterResourceNames, an entry may add `name` (a glob,
+  # {{ tenant }} expanded). Use exact names: "{{ tenant }}-*" for acme also
+  # matches acme-corp-prod.
   clusterResourceWhitelist: []
   #  - group: ""
   #    kind: Namespace
+  #    name: "{{ tenant }}-sandbox"
+
+  # Allow `name` on clusterResourceWhitelist entries (#13). ArgoCD before 3.3
+  # drops the field on apply, so a name-restricted entry would allow every
+  # object of its kind; with this false (the default), a name is refused. Set
+  # true only on ArgoCD 3.3 or later.
+  allowClusterResourceNames: false
 
   # Namespaced kinds every tenant's AppProject may NOT manage. Same override and
   # seeding rules as clusterResourceWhitelist.

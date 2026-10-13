@@ -47,6 +47,13 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
        group and kind are read with `index`, not as fields: from v0.0.8
        template-operator-v2 renders with missingkey=error, and a field read of
        an absent key would fail the child instead of rendering the core group. */ -}}
+{{- /* #13: `name` (ArgoCD 3.3+) on whitelist entries only, a string when present. */ -}}
+{{- range $i := $bl }}
+{{- if hasKey $i "name" }}{{- fail "a name is only supported on clusterResourceWhitelist entries, not namespaceResourceBlacklist" }}{{- end }}
+{{- end }}
+{{- range $i := $wl }}
+{{- if and (hasKey $i "name") (not (kindIs "string" (index $i "name"))) }}{{- fail (printf "clusterResourceWhitelist name must be a string, got %s (%v)" (kindOf (index $i "name")) (index $i "name")) }}{{- end }}
+{{- end }}
 {{- range $i := concat $wl $bl }}
 {{- if and (hasKey $i "group") (not (kindIs "string" (index $i "group"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist group must be a string, got %s (%v)" (kindOf (index $i "group")) (index $i "group")) }}{{- end }}
 {{- if and (hasKey $i "kind") (not (kindIs "string" (index $i "kind"))) }}{{- fail (printf "clusterResourceWhitelist/namespaceResourceBlacklist kind must be a string, got %s (%v)" (kindOf (index $i "kind")) (index $i "kind")) }}{{- end }}
@@ -72,9 +79,18 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $purge := eq .parameters.onDeletePurge "true" }}
 {{- /* Chart-wide and parent-set values; each must be exactly what the chart
        renders. A near-miss fails this child rather than silently granting. */ -}}
-{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" }}
+{{- range $p := list "controlPlaneDestination" "rolesExec" "rolesClusters" "impersonation" "clusterResourceNames" }}
 {{- if not (has (index $.parameters $p) (list "true" "false")) }}
 {{- fail (printf "%s must be exactly \"true\" or \"false\", got %q" $p (index $.parameters $p)) }}
+{{- end }}
+{{- end }}
+{{- /* #13. Before ArgoCD 3.3 the AppProject CRD has no `name` on these entries,
+       and the API server drops the field on apply: a name-restricted entry
+       would then allow EVERY object of its kind. So a name is refused unless
+       the platform confirms ArgoCD 3.3+ with argocd.allowClusterResourceNames. */ -}}
+{{- if ne .parameters.clusterResourceNames "true" }}
+{{- range $i := $wl }}
+{{- if hasKey $i "name" }}{{- fail (printf "clusterResourceWhitelist entry for kind %v has a name, which needs ArgoCD 3.3+: older ArgoCD drops it and allows every %v. Set argocd.allowClusterResourceNames: true once ArgoCD is 3.3 or later" (index $i "kind") (index $i "kind")) }}{{- end }}
 {{- end }}
 {{- end }}
 {{- if not (has .parameters.rolesProfile (list "leastPrivilege" "extensionsCompatible")) }}
@@ -131,6 +147,12 @@ spec:
     - {{ $r | quote }}
   {{- end }}
   {{- end }}
+  {{- if $sns }}
+  sourceNamespaces:
+  {{- range $s := $sns }}
+    - {{ $s | quote }}
+  {{- end }}
+  {{- end }}
   {{- /* The ArgoCD namespace is NOT a destination unless the platform opts in
          (#6). It does not need to be one: the AppProject lives there whatever
          `destinations` says, and destinations only limit where Applications
@@ -142,12 +164,6 @@ spec:
          matches a privileged pattern, and guarded against listing it twice
          when the parent already put it in namespacesJson (labelled for this
          tenant and not privileged). */}}
-  {{- if $sns }}
-  sourceNamespaces:
-  {{- range $s := $sns }}
-    - {{ $s | quote }}
-  {{- end }}
-  {{- end }}
   {{- $dests := $nsList }}
   {{- if and $cp (not (has $argoNs $nsList)) }}{{- $dests = append $nsList $argoNs }}{{- end }}
   {{- if $dests }}
@@ -206,6 +222,9 @@ spec:
   {{- range $i := $wl }}
     - group: {{ (index $i "group") | quote }}
       kind: {{ (index $i "kind") | quote }}
+      {{- if hasKey $i "name" }}
+      name: {{ index $i "name" | replace "{{tenant}}" $t | replace "{{ tenant }}" $t | quote }}
+      {{- end }}
   {{- end }}
   {{- end }}
   {{- if $bl }}

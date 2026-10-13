@@ -80,8 +80,21 @@ it is kept or deleted depends on your template-operator-v2 version, see
 |---|---|
 | [multi-tenant-operator][mto] | `Tenant` v1beta3 and `IntegrationConfig` v1beta1 |
 | [template-operator-v2][tov2] | v0.0.5 or later. `sync.mode: strict`, the default, needs the sync webhook (v0.0.3 or later; v0.0.6 or later on OpenShift without cert-manager). `onDeletePurgeAppProject: false`, the default, retains AppProjects only on v0.0.7 or later — on v0.0.6 and earlier they are deleted, see [What deletes an AppProject](#what-deletes-an-appproject) |
-| ArgoCD | `argoproj.io/v1alpha1` `AppProject` |
+| ArgoCD | `argoproj.io/v1alpha1` `AppProject`; 3.x, tested on 3.5.4. See [ArgoCD versions](#argocd-versions) |
 | Kubernetes | 1.33+ tested. tov2's CRDs do not install on 1.31 |
+
+### ArgoCD versions
+
+Upstream supports the last three minors (3.5, 3.4, 3.3 as of October 2026).
+OpenShift GitOps 1.22 ships ArgoCD 3.5.3, 1.21 ships 3.4.3, 1.20 ships 3.3.2.
+
+| Feature | Needs |
+|---|---|
+| this chart, security defaults included | ArgoCD 3.0+ |
+| Applications in the tenant's own namespace | ArgoCD 3.x; OpenShift GitOps 1.13+. 3-segment policies (`<project>/<namespace>/<app>`) need 3.4.4+ — OpenShift GitOps 1.21.0 (3.4.3) lacks that fix |
+| `name` on `clusterResourceWhitelist` entries | ArgoCD 3.3+, confirmed with `argocd.allowClusterResourceNames: true`; older ArgoCD drops the name and allows every object of the kind |
+| `description` / `syncOverrun` on sync windows | ArgoCD 3.1+ / 3.5+; older ArgoCD drops them, and a window without `syncOverrun` stays strict |
+| sync impersonation (beta), ApplicationSets in any namespace (stable) | ArgoCD 3.5+; OpenShift GitOps 1.22 |
 
 ## Quick start
 
@@ -171,14 +184,32 @@ Full reference with rationale in
 | `argocd.namespace` | — | **Required.** Where AppProjects are created |
 | `scaffolding.mode` | `OnAnnotation` | `Always`, `OnLabel`, `OnAnnotation`, `Never` |
 | `argocd.sourceRepos.pattern` | `[]` | Per-tenant repo patterns, one sourceRepos entry each; `{{ tenant }}` is expanded |
-| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage |
+| `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage — read [Cluster-scoped kinds](#cluster-scoped-kinds) first |
 | `argocd.namespaceResourceBlacklist` | `[]` | Namespaced kinds they may not |
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |
+| `argocd.allowClusterResourceNames` | `false` | Allow `name` on whitelist entries. Set it only on ArgoCD 3.3+ |
 | `roles.profile` | `leastPrivilege` | Or `extensionsCompatible`, the legacy shape |
 | `argocd.syncWindows` | `[]` | [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) on every AppProject |
 | `argocd.orphanedResources` | `off` | `warn` or `monitor` to flag resources no Application manages |
 | `roles.exec.enabled` / `roles.clusters.enabled` | `false` | Owner-only exec, cluster writes |
+
+### Cluster-scoped kinds
+
+A whitelisted cluster-scoped kind is allowed for **every** object of that kind
+in the cluster, and the application controller that syncs it is cluster-admin.
+With `{group: "", kind: Namespace}`, a tenant can change or delete any
+namespace — another tenant's, or `kube-system` — and can move a namespace into
+its own destinations by setting its `stakater.com/tenant` label.
+
+Since ArgoCD 3.3 an entry can take a `name` (a glob; `{{ tenant }}` is
+expanded). Older ArgoCD drops the field on apply, which turns the entry back
+into "every object of this kind", so the chart refuses a `name` unless
+`argocd.allowClusterResourceNames: true` confirms 3.3 or later. Use exact
+names. A prefix glob is not tenant-safe: `{{ tenant }}-*` for `acme` is
+`acme-*`, which also matches `acme-corp-prod`. And a tenant that manages its
+own Namespace objects controls their labels, the tenant label and the
+pod-security labels included.
 
 ### Per-tenant overrides
 
@@ -188,7 +219,7 @@ Six settings can be overridden per tenant, as annotations under
 | Annotation | Overrides | Format |
 |---|---|---|
 | `source-repos` | `argocd.sourceRepos.pattern` | JSON array of strings |
-| `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind}` |
+| `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind, name?}` |
 | `namespace-resource-blacklist` | `argocd.namespaceResourceBlacklist` | JSON array of `{group, kind}` |
 | `on-delete-purge` | `onDeletePurgeAppProject` | `"true"` or `"false"` |
 | `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, andOperator?, timeZone?, description?, syncOverrun?}`. `schedule` is a five-field cron, `duration` a Go duration such as `8h`; `description` needs ArgoCD 3.1+, `syncOverrun` 3.5+ |
@@ -302,6 +333,30 @@ both `managed-by` an instance and a source namespace without custom roles.
 The tenant's existing `<tenant>/*` role policies already cover Applications
 there; 3-segment policies (`<project>/<namespace>/<app>`) need ArgoCD 3.4.4 or
 later.
+
+## ApplicationSets in tenant namespaces
+
+The roles already grant `applicationsets`, and with
+[source namespaces](#applications-in-the-tenants-own-namespace) tenants can
+create ApplicationSets in their own namespace too (#14). ApplicationSets in any
+namespace are stable in ArgoCD 3.5 and GA in OpenShift GitOps 1.22; generated
+Applications land in the ApplicationSet's namespace.
+
+They carry risks only platform settings can close
+([ArgoCD docs](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Appset-Any-Namespace/)):
+
+| Setting (`argocd-cmd-params-cm`) | Why |
+|---|---|
+| `applicationsetcontroller.namespaces: "*-argocd"` | the controller only reads ApplicationSets there; keep it equal to the source namespaces |
+| `applicationsetcontroller.allowed.scm.providers` | SCM-provider and pull-request generators can reach arbitrary hosts with the tenant's tokens; allow only yours |
+| `applicationsetcontroller.enable.scm.providers: "false"` | if tenants don't need those generators at all |
+| `applicationsetcontroller.enable.tokenref.strict.mode: "true"` | a generator may only use token Secrets labelled for ApplicationSets |
+
+On OpenShift GitOps 1.22 the same lives in the `ArgoCD` resource:
+`spec.applicationSet.sourceNamespaces` and `spec.applicationSet.scmProviders`.
+Two more things to know: a `clusters: {}` generator discovers every cluster
+ArgoCD knows, and an ApplicationSet whose template sets `project` from a
+parameter cannot use project-scoped repositories.
 
 ## Sync impersonation
 

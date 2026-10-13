@@ -177,6 +177,15 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "argocd.syncWindows default with a bad duration",
 			json:    map[string]string{"argocd": `{"namespace":"argo-cd","syncWindows":[{"kind":"deny","schedule":"0 22 * * *","duration":"8 hours"}]}`},
 			wantErr: "must be a Go duration"},
+		// #13. ArgoCD before 3.3 drops a whitelist name and allows every object
+		// of the kind, so a name needs the explicit 3.3+ confirmation.
+		{name: "non-boolean argocd.allowClusterResourceNames",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.allowClusterResourceNames": `"true"`},
+			wantErr: "argocd.allowClusterResourceNames must be true or false"},
+		{name: "a whitelist name without allowClusterResourceNames",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","clusterResourceWhitelist":[{"group":"","kind":"Namespace","name":"x"}]}`},
+			wantErr: "needs ArgoCD 3.3+"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},
