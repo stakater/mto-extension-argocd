@@ -251,6 +251,54 @@ that deploy *into* the ArgoCD namespace stop syncing; move them out of the
 control plane first, or set both compatibility values, upgrade, migrate, and
 remove them.
 
+## Applications in the tenant's own namespace
+
+Off by default (#9). With it, tenants create their Applications in their own
+namespace instead of the ArgoCD control plane, whose write access is ArgoCD
+admin:
+
+```yaml
+argocd:
+  sourceNamespaces:
+    enabled: true
+    pattern: "{{ tenant }}-argocd"   # the default
+```
+
+Every AppProject then carries `sourceNamespaces: [<tenant>-argocd]`, but only
+once that namespace exists and carries the tenant's label, like a destination.
+Anyone who can write an Application in a source namespace can use the
+AppProject, so it is never a namespace that belongs to someone else.
+
+The pattern must contain `{{ tenant }}` and expand to a plain namespace name.
+ArgoCD reads a glob there, and `{{ tenant }}*` for `acme` would also match
+`acme-corp-argocd`; both are refused at install time. A pattern that expands
+to the ArgoCD namespace, or to a privileged namespace, fails that tenant's
+child and no other.
+
+Kubernetes RBAC on that namespace decides who creates and deletes
+Applications there: a tenant member with `edit` in it can `kubectl apply` one.
+The project roles (edit cannot create or delete, see
+[Security defaults](#security-defaults)) govern only the ArgoCD UI and API.
+
+Applications in any namespace is
+[stable in ArgoCD](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/)
+and needs two gates; this chart sets only the second:
+
+1. **ArgoCD watches the namespaces.** Upstream: `application.namespaces:
+   "*-argocd"` in `argocd-cmd-params-cm`, then restart argocd-server and the
+   application controller; argocd-server also needs the cluster RBAC described
+   in the ArgoCD docs. OpenShift GitOps 1.13+: `ArgoCD.spec.sourceNamespaces`
+   (globs accepted) on the cluster-scoped instance.
+1. **The AppProject allows them** — `sourceNamespaces`, rendered here.
+
+The `<tenant>-argocd` namespace itself comes from the Multi-Tenant Operator,
+for example `namespaces.withTenantPrefix: [argocd]` on the Tenant. Keep it
+separate from workload namespaces: on OpenShift GitOps a namespace cannot be
+both `managed-by` an instance and a source namespace without custom roles.
+The tenant's existing `<tenant>/*` role policies already cover Applications
+there; 3-segment policies (`<project>/<namespace>/<app>`) need ArgoCD 3.4.4 or
+later.
+
 ## Before production
 
 Four ways to end up with something that looks correct and isn't.

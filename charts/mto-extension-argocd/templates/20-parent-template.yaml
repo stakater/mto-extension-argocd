@@ -36,6 +36,12 @@ spec:
     {{- /* #6: whether the ArgoCD namespace may be a tenant destination. */}}
     - name: allowControlPlaneDestination
       value: {{ (.Values.argocd).allowControlPlaneDestination | default false | toString | quote }}
+    {{- include "mto-extension-argocd.validateSourceNamespaces" . }}
+    {{- /* #9: the tenant's Application namespace. */}}
+    - name: sourceNamespacesEnabled
+      value: {{ ((.Values.argocd).sourceNamespaces).enabled | default false | toString | quote }}
+    - name: sourceNamespacesPattern
+      value: {{ ((.Values.argocd).sourceNamespaces).pattern | default "{{ tenant }}-argocd" | quote }}
     {{- /* Covers tenantNamespaceLabel, both scaffolding keys and the four
            override annotation keys below: an empty key matches nothing, so the
            override it carries is silently ignored. */}}

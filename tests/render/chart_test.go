@@ -120,6 +120,27 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 			wantErr: "not a valid Kubernetes label"},
 		// The override keys and the opt-in key share the Tenant annotation map;
 		// a duplicate makes the opt-in marker and an override read each other.
+		// #9. A string "false" would turn source namespaces on.
+		{name: "non-boolean argocd.sourceNamespaces.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.enabled": `"false"`},
+			wantErr: "argocd.sourceNamespaces.enabled must be true or false"},
+		{name: "empty argocd.sourceNamespaces.pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": ""},
+			wantErr: "argocd.sourceNamespaces.pattern must be a non-empty string"},
+		// Without {{ tenant }} every AppProject lists the same namespace; a
+		// glob matches other tenants' namespaces. Both are cross-tenant.
+		{name: "sourceNamespaces pattern without the tenant",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceNamespaces.pattern": "shared-apps"},
+			wantErr: "argocd.sourceNamespaces.pattern must contain {{ tenant }}"},
+		{name: "sourceNamespaces glob pattern",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}*"`},
+			wantErr: "must expand to a plain namespace name"},
+		{name: "unrecognised sourceNamespaces placeholder",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}-${env}"`},
+			wantErr: "unrecognised placeholder"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},

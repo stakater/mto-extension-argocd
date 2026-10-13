@@ -194,6 +194,36 @@ into [].
 {{- end -}}
 
 {{- /*
+#9. ArgoCD matches sourceNamespaces as globs and regexes, so the pattern must
+expand to exactly one namespace name, and a different one per tenant. Without
+{{ tenant }} every AppProject lists the same namespace; with a glob,
+"{{ tenant }}*" for acme also matches acme-corp-argocd. Either way an
+Application there may use another tenant's AppProject.
+*/ -}}
+{{- define "mto-extension-argocd.validateSourceNamespaces" -}}
+{{- $sn := (.Values.argocd).sourceNamespaces | default dict -}}
+{{- if and (hasKey $sn "enabled") (not (kindIs "invalid" $sn.enabled)) (not (kindIs "bool" $sn.enabled)) -}}
+{{- fail (printf "argocd.sourceNamespaces.enabled must be true or false (a boolean), got %s %v" (kindOf $sn.enabled) $sn.enabled) -}}
+{{- end -}}
+{{- $p := $sn.pattern | default "{{ tenant }}-argocd" -}}
+{{- if and (hasKey $sn "pattern") (or (not (kindIs "string" $sn.pattern)) (eq $sn.pattern "")) -}}
+{{- fail "argocd.sourceNamespaces.pattern must be a non-empty string; {{ tenant }} is expanded to the tenant's name" -}}
+{{- end -}}
+{{- if not (or (contains "{{ tenant }}" $p) (contains "{{tenant}}" $p)) -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern must contain {{ tenant }}, got %q: without it every tenant's AppProject accepts Applications from the same namespace" $p) -}}
+{{- end -}}
+{{- $expanded := replace "{{tenant}}" "x" (replace "{{ tenant }}" "x" $p) -}}
+{{- range $residue := list "{{" "${" "$(" "%s" -}}
+{{- if contains $residue $expanded -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $expanded) -}}
+{{- fail (printf "argocd.sourceNamespaces.pattern %q must expand to a plain namespace name (lowercase letters, digits and -); ArgoCD reads a glob or regex there, which can match another tenant's namespace" $p) -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
 Security-relevant values (#6, #7). The schema types them, but it is skippable,
 and a template reads the string "false" as true -- which would grant exec,
 cluster writes or the control-plane destination. An unknown profile must not
