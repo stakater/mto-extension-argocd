@@ -80,6 +80,22 @@
               "description": "The tenant's Application namespace; must contain {{ tenant }}, which is expanded, and no globs. Default {{ tenant }}-argocd."
             }
           }
+        },
+        "impersonation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Render destinationServiceAccounts, one per tenant namespace (#15). ArgoCD 3.5+. Default false."
+            },
+            "serviceAccount": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+              "maxLength": 253,
+              "description": "ServiceAccount in each tenant namespace that syncs run as. Default argocd-deployer."
+            }
+          }
         }
       }
     },

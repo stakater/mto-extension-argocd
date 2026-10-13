@@ -299,6 +299,75 @@ The tenant's existing `<tenant>/*` role policies already cover Applications
 there; 3-segment policies (`<project>/<namespace>/<app>`) need ArgoCD 3.4.4 or
 later.
 
+## Sync impersonation
+
+Off by default (#15). Without it every sync runs as ArgoCD's application
+controller, which upstream ships with a `*/*/*` ClusterRole. With it, ArgoCD
+syncs as a ServiceAccount in the destination namespace, so a sync can only do
+what the tenant could do itself:
+
+```yaml
+argocd:
+  impersonation:
+    enabled: true
+    serviceAccount: argocd-deployer   # the default
+```
+
+Every AppProject then carries one `destinationServiceAccounts` entry per tenant
+namespace, `defaultServiceAccount: argocd-deployer`. There is deliberately no
+catch-all entry, unlike the upstream example: a destination without an entry
+fails the sync instead of falling back to the controller. The ArgoCD namespace
+never gets an entry.
+
+Also needed, outside this chart:
+
+1. **ArgoCD 3.5 or later**, where
+   [impersonation](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-sync-using-impersonation/)
+   is beta (alpha before) and also covers server operations. Enable it with
+   `application.sync.impersonation.enabled: "true"` in `argocd-cm`; on
+   OpenShift GitOps, through `ArgoCD.spec.extraConfig`.
+1. **The ServiceAccount in every tenant namespace**, bound to the namespace's
+   `edit` ClusterRole. A Multi-Tenant Operator template does it once for every
+   tenant:
+
+   ```yaml
+   apiVersion: tenantoperator.stakater.com/v1alpha1
+   kind: Template
+   metadata:
+     name: argocd-deployer
+   resources:
+     manifests:
+       - apiVersion: v1
+         kind: ServiceAccount
+         metadata:
+           name: argocd-deployer
+       - apiVersion: rbac.authorization.k8s.io/v1
+         kind: RoleBinding
+         metadata:
+           name: argocd-deployer-edit
+         roleRef:
+           apiGroup: rbac.authorization.k8s.io
+           kind: ClusterRole
+           name: edit
+         subjects:
+           - kind: ServiceAccount
+             name: argocd-deployer
+   ```
+
+   Apply it to every tenant namespace with a `TemplateGroupInstance` whose
+   selector matches the `stakater.com/tenant` label.
+
+1. **A reduced controller ClusterRole** for real damage limitation. Otherwise
+   impersonation enforces tenant boundaries at sync time, but the controller
+   still holds cluster-admin.
+
+ArgoCD picks the account by the Application's destination namespace, and the
+template above grants it `edit` in that namespace only. Two kinds of
+Application therefore stop syncing: one that carries a cluster-scoped kind from
+`clusterResourceWhitelist`, such as a `Namespace`, and one whose manifests put
+objects into another namespace. Grant those rights to the deployer
+deliberately, or keep such Applications out of tenant projects.
+
 ## Before production
 
 Four ways to end up with something that looks correct and isn't.

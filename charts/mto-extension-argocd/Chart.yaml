@@ -22,8 +22,8 @@ description: |
   scaffolding.mode or deleting the Tenant deletes the AppProjects of those
   tenants, and helm uninstall deletes all of them.
 type: application
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.4.0
+appVersion: "0.4.0"
 keywords:
   - argocd
   - multi-tenant-operator

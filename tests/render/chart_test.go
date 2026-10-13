@@ -141,6 +141,16 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 			sets:    map[string]string{"argocd.namespace": "argo-cd"},
 			json:    map[string]string{"argocd.sourceNamespaces.pattern": `"{{ tenant }}-${env}"`},
 			wantErr: "unrecognised placeholder"},
+		// #15. A string "false" would turn impersonation on.
+		{name: "non-boolean argocd.impersonation.enabled",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.impersonation.enabled": `"false"`},
+			wantErr: "argocd.impersonation.enabled must be true or false"},
+		// A glob here would be a catch-all in disguise; an invalid name never
+		// matches and every sync fails.
+		{name: "invalid argocd.impersonation.serviceAccount",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.impersonation.serviceAccount": "*"},
+			wantErr: "argocd.impersonation.serviceAccount must be a ServiceAccount name"},
 		// An unrecognised profile must not fall back to either shape silently.
 		{name: "invalid roles.profile",
 			sets:    map[string]string{"argocd.namespace": "argo-cd", "roles.profile": "everything"},

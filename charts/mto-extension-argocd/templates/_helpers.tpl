@@ -223,6 +223,17 @@ Application there may use another tenant's AppProject.
 {{- end -}}
 {{- end -}}
 
+{{- define "mto-extension-argocd.validateImpersonation" -}}
+{{- $im := (.Values.argocd).impersonation | default dict -}}
+{{- if and (hasKey $im "enabled") (not (kindIs "invalid" $im.enabled)) (not (kindIs "bool" $im.enabled)) -}}
+{{- fail (printf "argocd.impersonation.enabled must be true or false (a boolean), got %s %v" (kindOf $im.enabled) $im.enabled) -}}
+{{- end -}}
+{{- $sa := $im.serviceAccount | default "argocd-deployer" | toString -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" $sa) -}}
+{{- fail (printf "argocd.impersonation.serviceAccount must be a ServiceAccount name (lowercase DNS subdomain), got %q; a glob would act as a catch-all" $sa) -}}
+{{- end -}}
+{{- end -}}
+
 {{- /*
 Security-relevant values (#6, #7). The schema types them, but it is skippable,
 and a template reads the string "false" as true -- which would grant exec,
