@@ -41,9 +41,9 @@ this chart replaces it (README, "Differences from the Extensions controller").
 - **Isolation by construction.** Destinations come from the tenant's namespaces,
   minus privileged ones; nothing is configured by hand.
 - **Self-service without admin.** Tenants create Applications in their own
-  namespace (target), never in the control plane.
+  namespace (opt-in), never in the control plane.
 - **Least privilege at sync time.** With impersonation, a sync can only do what
-  the tenant's own ServiceAccount can (target).
+  the tenant's own ServiceAccount can (opt-in, Argo CD 3.5+).
 - **Safe migration.** It replaces the Extensions controller one tenant at a
   time, without disrupting an AppProject.
 

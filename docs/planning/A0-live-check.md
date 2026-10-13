@@ -5,15 +5,15 @@ Acceptance: AC-ISO-3 (reproduce, then prove fixed), AC-SS-1, AC-SS-2.
 
 ## Why (one paragraph)
 
-The chart was verified on Argo CD 3.4.6; the current line is 3.5.4 and
-OpenShift GitOps 1.22. The research behind ADR-0006..0010 is from docs and
-source. Before changing destinations, roles or adding impersonation, confirm on
-a live install that the control-plane escalation is real, and that the target
-features work where customers run them.
+The research behind ADR-0006..0010 is from docs and source, and the changes
+shipped before this check (charts 0.2.0–0.7.1; the e2e suite runs on kind with
+Argo CD 3.5.4). What only a live install can show is still open: that the
+control-plane escalation was real on 0.1.0, and that the new features work on
+OpenShift GitOps 1.22, where customers run them.
 
 ## Governing constraints
 
-ADR-0006..0010 are Accepted and built (chart 0.2.0 to 0.7.0); A.0 confirms
+ADR-0006..0010 are Accepted and built (chart 0.2.0 to 0.7.1); A.0 confirms
 them on live clusters or supersedes them. ADR-0001..0005 are built and stay. Record exact
 versions. No credentials in findings.
 
@@ -24,7 +24,7 @@ OpenShift with GitOps 1.22.
 
 | # | Question | How | If the answer differs |
 |---|---|---|---|
-| 1 | Control-plane escalation with today's chart | as an `acme` owner, sync an Application whose source holds an `AppProject` and a repository Secret for the Argo CD namespace | if blocked, record why; ADR-0006 stays as defence in depth |
+| 1 | Control-plane escalation with chart 0.1.0, and refused from 0.2.0 | as an `acme` owner, sync an Application whose source holds an `AppProject` and a repository Secret for the Argo CD namespace | if blocked, record why; ADR-0006 stays as defence in depth |
 | 2 | Default `openshift-gitops` writes into tenant namespaces without `managed-by` | deploy to `acme-dev` unlabelled | document the label as a prerequisite, or impersonation |
 | 3 | Impersonation via `extraConfig` on GitOps 1.22, and Red Hat's support position | enable, sync as `argocd-deployer` | gate A.7 on support |
 | 4 | Exec honours impersonation in 3.5 | open a terminal with impersonation on | keep exec off regardless |

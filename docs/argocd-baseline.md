@@ -4,7 +4,12 @@
 v3.4.10 and v3.3.15 were patched the same day; v3.6.0-rc2 is in pre-release.
 Upstream supports the last three minors (3.5, 3.4, 3.3). Red Hat **OpenShift
 GitOps 1.22.0** (2026-09-30) ships Argo CD 3.5.3; 1.21 ships 3.4.3; 1.20 ships
-3.3.2. The chart was verified on Argo CD 3.4.6 (README).
+3.3.2. The chart was verified on Argo CD 3.4.6 (README); since chart 0.7.1 the
+e2e suite runs on 3.5.4.
+
+> **Written against chart 0.1.0** (2026-10-09). Where a consequence below says
+> "today", it describes 0.1.0; the roadmap (A.3–A.12, charts 0.2.0–0.7.1)
+> records what was built.
 
 Every decision cites a row. **VERIFY** marks what isn't settled; each is a task
 in story A.0. Sources: `argo-cd.readthedocs.io/en/stable/…`,
@@ -16,12 +21,12 @@ manifests), `docs.redhat.com/…/red_hat_openshift_gitops/1.22/…`,
 
 | # | Fact | Consequence | Source |
 |---|---|---|---|
-| V1 | v3.5.4 latest GA; 3.6.0-rc2 pre-release. | Re-verify on 3.5.x (A.9). | releases v3.5.4, v3.6.0-rc2 |
+| V1 | v3.5.4 latest GA; 3.6.0-rc2 pre-release. | Re-verify on 3.5.x (A.9): e2e on 3.5.4 since 0.7.1. | releases v3.5.4, v3.6.0-rc2 |
 | V2 | Last three minors supported. | 3.5, 3.4, 3.3 today. | `SECURITY.md` |
 | V3 | 3.0: `update`/`delete` no longer cover managed resources (`update/*`, `delete/*`); `logs` RBAC always enforced; Dex users identified by `federated_claims.user_id`. | Viewers need `logs, get` (the chart grants it). | upgrading/2.14-3.0 |
 | V4 | 3.0–3.2 stop the project API exposing credentials of project-scoped repositories and clusters. | Run 3.x+ before tenants self-serve repository credentials. | upgrading/3.1-3.2 |
 | V5 | 3.2: `application.sync.requireOverridePrivilegeForRevisionSync` makes syncing another revision need `override`. | `applications, *` hands out `override`. | rbac/#the-override-action |
-| V6 | 3.3: cluster-resource allow/deny lists can match by name (globs). | The chart drops `name` today (A.12). | user-guide/projects; v3.3.0 |
+| V6 | 3.3: cluster-resource allow/deny lists can match by name (globs). | 0.1.0 dropped `name`; since 0.7.1 it is kept behind `argocd.allowClusterResourceNames` (A.12), because older versions drop it on apply. | user-guide/projects; v3.3.0 |
 | V7 | 3.5: impersonation beta (also for server operations), `enforced` flag; ApplicationSets in any namespace stable; Source Integrity replaces `signatureKeys`. | 3.5 completes the current tenancy model. | v3.5.0; upgrading/3.4-3.5 |
 | V8 | 3.6 (rc): opt-in separate `rollback` action. | Watch. | PR #28924 |
 | V9 | OpenShift GitOps 1.22 → Argo CD 3.5.3 (OCP 4.18–4.22); 1.21 → 3.4.3; 1.20 → 3.3.2. | Impersonation beta and the 3.4.4 RBAC fix only on 1.22. | GitOps 1.22 release notes |
@@ -57,7 +62,7 @@ manifests), `docs.redhat.com/…/red_hat_openshift_gitops/1.22/…`,
 |---|---|---|---|
 | R1 | Project role policies may only use `applications, applicationsets, repositories, exec, logs, clusters`; `*` as a resource is rejected. | The chart's six-line shape is right. | `types.go` `validatePolicy` |
 | R2 | `exec` has only `create`, needs `exec.enabled`, and runs as the argocd-server ServiceAccount — the user "effectively has the same privileges". | `exec` for owner/edit is a shell outside the tenant's own RBAC and audit; `exec, get` for view does nothing (ADR-0009). | web_based_terminal; rbac |
-| R3 | `applications, *` includes `update/*`, `delete/*`, `override`, `action/*`, `sync`. | Owner and edit are identical today (ADR-0009). | rbac |
+| R3 | `applications, *` includes `update/*`, `delete/*`, `override`, `action/*`, `sync`. | Owner and edit were identical in 0.1.0; narrowed in 0.2.0 (ADR-0009). | rbac |
 | R4 | Default policies apply to every authenticated user and can't be denied; OpenShift GitOps's default instance gives non-admins nothing. | Isolation depends on `policy.default` staying empty. | rbac/#default-policy; GitOps access control |
 | R5 | `signatureKeys` deprecated in 3.5 (use `sourceIntegrity`); nothing else deprecated; API still `argoproj.io/v1alpha1`. | The chart uses no deprecated fields. | `types.go`; upgrading/3.4-3.5 |
 
@@ -68,7 +73,7 @@ manifests), `docs.redhat.com/…/red_hat_openshift_gitops/1.22/…`,
 | T1 | Project-scoped repositories and clusters are Secrets with a `project` field; self-service needs `repositories`/`clusters` create/update/delete. | Owners managing repository credentials is legitimate; tenants registering clusters rarely is. | user-guide/projects |
 | T2 | `permitOnlyProjectScopedClusters` restricts destinations to the project's clusters. | Multi-cluster only. | project.yaml |
 | T3 | `sourceRepos` and `destinations` support `!` negation and globs. | Keep explicit namespace lists. | user-guide/projects |
-| T4 | Sync windows (`syncOverrun` in 3.5), `orphanedResources.warn`, global projects. | Per-tenant annotations later (A.11). | project.yaml |
+| T4 | Sync windows (`syncOverrun` in 3.5), `orphanedResources.warn`, global projects. | Per-tenant annotations since 0.6.0 (A.11), `syncOverrun` included. | project.yaml |
 | T5 | Source Hydrator beta; Technology Preview in GitOps 1.22. | Out of scope. | feature-maturity |
 | T6 | OpenShift GitOps: user-defined instances are namespace-scoped; `managed-by` gives namespace-admin; `openshift-gitops` is cluster-scoped. | **VERIFY** whether the default instance's controller writes into tenant namespaces without `managed-by` on 1.22. | GitOps "Argo CD instance" |
 | T7 | Argo CD Agent 0.10.0 GA in GitOps 1.22. | Multi-cluster tenants later. | GitOps 1.22 release notes |
@@ -84,7 +89,7 @@ manifests), `docs.redhat.com/…/red_hat_openshift_gitops/1.22/…`,
 
 ## Open questions (VERIFY), owned by story A.0
 
-1. Reproduce the control-plane escalation on today's chart: an `acme` owner
+1. Reproduce the control-plane escalation on chart 0.1.0: an `acme` owner
    syncs an `AppProject`/`Application`/repository Secret into the Argo CD
    namespace. (N3, ADR-0006)
 1. Does the default `openshift-gitops` controller write into tenant namespaces

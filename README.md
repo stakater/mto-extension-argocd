@@ -9,10 +9,8 @@ no OLM bundle. It replaces `ExtensionsArgoCDReconciler` and the `Extensions`
 CRD in [multi-tenant-operator][mto].
 
 > **Design:** requirements, decisions and findings against Argo CD 3.5 are in
-> [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
-> Two findings are security fixes to make first: the Argo CD namespace in
-> every tenant's destinations ([ADR-0006](docs/adr/0006-no-control-plane-destination.md))
-> and roles broader than they need to be ([ADR-0009](docs/adr/0009-least-privilege-roles.md)).
+> [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md); the
+> decisions are in [docs/adr/](docs/adr/).
 
 ## Contents
 

@@ -26,7 +26,7 @@ flowchart LR
   IDP -->|groups| AC
 ```
 
-## C4 — Container (target)
+## C4 — Container, with the opt-ins on
 
 ```mermaid
 flowchart LR
@@ -65,7 +65,7 @@ sequenceDiagram
   A->>A: destination allowed; sync
 ```
 
-## Sequence — a sync with impersonation (target)
+## Sequence — a sync with impersonation (opt-in)
 
 ```mermaid
 sequenceDiagram

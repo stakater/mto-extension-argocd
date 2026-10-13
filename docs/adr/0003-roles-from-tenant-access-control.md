@@ -1,7 +1,7 @@
 # ADR-0003: Roles from the Tenant's access lists, for equivalence
 
-- **Status:** Accepted (built, PR #1); an alternative source is proposed in
-  ADR-0010
+- **Status:** Accepted (built, PR #1); ADR-0010 adds an optional alternative
+  source (built, chart 0.5.0); this stays the default
 - **Date:** 2026-08-06
 
 ## Context
