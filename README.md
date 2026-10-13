@@ -176,11 +176,13 @@ Full reference with rationale in
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |
 | `roles.profile` | `leastPrivilege` | Or `extensionsCompatible`, the legacy shape |
+| `argocd.syncWindows` | `[]` | [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) on every AppProject |
+| `argocd.orphanedResources` | `off` | `warn` or `monitor` to flag resources no Application manages |
 | `roles.exec.enabled` / `roles.clusters.enabled` | `false` | Owner-only exec, cluster writes |
 
 ### Per-tenant overrides
 
-Four settings can be overridden per tenant, as annotations under
+Six settings can be overridden per tenant, as annotations under
 `argocd.tenantoperator.stakater.com/`:
 
 | Annotation | Overrides | Format |
@@ -189,6 +191,8 @@ Four settings can be overridden per tenant, as annotations under
 | `cluster-resource-whitelist` | `argocd.clusterResourceWhitelist` | JSON array of `{group, kind}` |
 | `namespace-resource-blacklist` | `argocd.namespaceResourceBlacklist` | JSON array of `{group, kind}` |
 | `on-delete-purge` | `onDeletePurgeAppProject` | `"true"` or `"false"` |
+| `sync-windows` | `argocd.syncWindows` | JSON array of `{kind, schedule, duration, applications?, namespaces?, clusters?, manualSync?, andOperator?, timeZone?, description?, syncOverrun?}`. `schedule` is a five-field cron, `duration` a Go duration such as `8h`; `description` needs ArgoCD 3.1+, `syncOverrun` 3.5+ |
+| `orphaned-resources` | `argocd.orphanedResources` | `off`, `warn` or `monitor` |
 
 An **absent** annotation inherits the chart default. An explicit `[]`
 **overrides with empty** — a different thing, which is why the annotation's

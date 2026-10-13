@@ -88,6 +88,28 @@ execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 {{- $useACL := ne .parameters.identityMode "groupPattern" }}
 {{- $usePattern := ne .parameters.identityMode "accessControl" }}
 {{- $sns := mustFromJson .parameters.sourceNamespacesJson }}
+{{- /* #12. Every window is checked field by field and rendered field by field:
+       a value that would apply cleanly but mean something else must fail
+       this tenant instead. */ -}}
+{{- if not (has .parameters.orphanedResources (list "off" "warn" "monitor")) }}
+{{- fail (printf "orphaned-resources must be off, warn or monitor, got %q" .parameters.orphanedResources) }}
+{{- end }}
+{{- $sw := mustFromJson .parameters.syncWindowsJson }}
+{{- if not (kindIs "slice" $sw) }}{{- fail (printf "sync-windows must be a JSON list, got %s" (kindOf $sw)) }}{{- end }}
+{{- range $w := $sw }}
+{{- if not (kindIs "map" $w) }}{{- fail (printf "sync-windows entries must be objects, got %s" (kindOf $w)) }}{{- end }}
+{{- range $k, $_ := $w }}{{- if not (has $k (list "kind" "schedule" "duration" "applications" "namespaces" "clusters" "manualSync" "timeZone" "andOperator" "description" "syncOverrun")) }}{{- fail (printf "sync-windows: unknown field %q" $k) }}{{- end }}{{- end }}
+{{- if not (has (index $w "kind") (list "allow" "deny")) }}{{- fail (printf "sync-windows: kind must be allow or deny, got %v" (index $w "kind")) }}{{- end }}
+{{- range $k := list "schedule" "duration" }}{{- if or (not (kindIs "string" (index $w $k))) (eq (index $w $k) "") }}{{- fail (printf "sync-windows: %s must be a non-empty string" $k) }}{{- end }}{{- end }}
+{{- /* ArgoCD parses these only when it evaluates the window, and a bad one
+       blocks every sync in the project ("invalid sync windows"). Its parser
+       takes exactly five cron fields, no @daily, and a Go duration. */ -}}
+{{- if not (regexMatch "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$" (index $w "schedule")) }}{{- fail (printf "sync-windows: schedule %q must be a cron expression with five fields: minute hour day-of-month month day-of-week" (index $w "schedule")) }}{{- end }}
+{{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" (index $w "duration")) }}{{- fail (printf "sync-windows: duration %q must be a Go duration, such as 8h or 1h30m" (index $w "duration")) }}{{- end }}
+{{- range $k := list "timeZone" "description" }}{{- if and (hasKey $w $k) (not (kindIs "string" (index $w $k))) }}{{- fail (printf "sync-windows: %s must be a string" $k) }}{{- end }}{{- end }}
+{{- range $k := list "manualSync" "andOperator" "syncOverrun" }}{{- if and (hasKey $w $k) (not (kindIs "bool" (index $w $k))) }}{{- fail (printf "sync-windows: %s must be true or false" $k) }}{{- end }}{{- end }}
+{{- range $k := list "applications" "namespaces" "clusters" }}{{- if hasKey $w $k }}{{- if not (kindIs "slice" (index $w $k)) }}{{- fail (printf "sync-windows: %s must be a list" $k) }}{{- end }}{{- range $s := index $w $k }}{{- if not (kindIs "string" $s) }}{{- fail (printf "sync-windows: %s entries must be strings" $k) }}{{- end }}{{- end }}{{- end }}{{- end }}
+{{- end }}
 {{- range $r := mustFromJson .parameters.sourceNamespacesRefusedJson }}{{- fail $r }}{{- end }}
 {{- $legacyRoles := eq .parameters.rolesProfile "extensionsCompatible" }}
 {{- $exec := eq .parameters.rolesExec "true" }}
@@ -148,6 +170,36 @@ spec:
       namespace: {{ $ns | quote }}
       defaultServiceAccount: {{ $.parameters.impersonationServiceAccount | quote }}
   {{- end }}
+  {{- end }}
+  {{- if $sw }}
+  syncWindows:
+  {{- range $w := $sw }}
+    - kind: {{ index $w "kind" | quote }}
+      schedule: {{ index $w "schedule" | quote }}
+      duration: {{ index $w "duration" | quote }}
+      {{- range $k := list "applications" "namespaces" "clusters" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}:
+      {{- range $s := index $w $k }}
+        - {{ $s | quote }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- range $k := list "manualSync" "andOperator" "syncOverrun" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}: {{ index $w $k }}
+      {{- end }}
+      {{- end }}
+      {{- range $k := list "timeZone" "description" }}
+      {{- if hasKey $w $k }}
+      {{ $k }}: {{ index $w $k | quote }}
+      {{- end }}
+      {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- if ne .parameters.orphanedResources "off" }}
+  orphanedResources:
+    warn: {{ eq .parameters.orphanedResources "warn" }}
   {{- end }}
   {{- if $wl }}
   clusterResourceWhitelist:

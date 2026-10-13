@@ -39,6 +39,12 @@ spec:
     {{- include "mto-extension-argocd.validateSourceNamespaces" . }}
     {{- include "mto-extension-argocd.validateImpersonation" . }}
     {{- include "mto-extension-argocd.validateIdentity" . }}
+    {{- include "mto-extension-argocd.validateSyncAndOrphaned" . }}
+    {{- /* #12 chart defaults; a Tenant may override either by annotation. */}}
+    - name: defaultSyncWindowsJson
+      value: {{ (.Values.argocd).syncWindows | default list | toJson | quote }}
+    - name: defaultOrphanedResources
+      value: {{ (.Values.argocd).orphanedResources | default "off" | toString | quote }}
     {{- /* #9: the tenant's Application namespace. */}}
     - name: sourceNamespacesEnabled
       value: {{ ((.Values.argocd).sourceNamespaces).enabled | default false | toString | quote }}
@@ -79,6 +85,10 @@ spec:
       value: {{ .Values.annotations.namespaceResourceBlacklist | quote }}
     - name: annotationOnDeletePurge
       value: {{ .Values.annotations.onDeletePurge | quote }}
+    - name: annotationSyncWindows
+      value: {{ .Values.annotations.syncWindows | quote }}
+    - name: annotationOrphanedResources
+      value: {{ .Values.annotations.orphanedResources | quote }}
   {{- with include "mto-extension-argocd.sync" . }}
   {{- . | nindent 2 }}
   {{- end }}

@@ -122,7 +122,7 @@ and every tenant renders with no destinations except the ArgoCD namespace.
 */ -}}
 {{- define "mto-extension-argocd.validateOverrideKeys" -}}
 {{- $a := .Values.annotations | default dict -}}
-{{- range $k := list "sourceRepos" "clusterResourceWhitelist" "namespaceResourceBlacklist" "onDeletePurge" -}}
+{{- range $k := list "sourceRepos" "clusterResourceWhitelist" "namespaceResourceBlacklist" "onDeletePurge" "syncWindows" "orphanedResources" -}}
 {{- if not (get $a $k) -}}
 {{- fail (printf "annotations.%s must be a non-empty annotation key; an empty key never matches any Tenant annotation, so that per-tenant override is silently ignored and the chart default silently wins" $k) -}}
 {{- end -}}
@@ -152,9 +152,9 @@ annotation keys: the label keys live in other maps and cannot collide here.
 {{- define "mto-extension-argocd.validateKeyCollisions" -}}
 {{- $a := .Values.annotations | default dict -}}
 {{- $s := .Values.scaffolding | default dict -}}
-{{- $keys := list $a.sourceRepos $a.clusterResourceWhitelist $a.namespaceResourceBlacklist $a.onDeletePurge (default dict $s.annotations).enabled -}}
+{{- $keys := list $a.sourceRepos $a.clusterResourceWhitelist $a.namespaceResourceBlacklist $a.onDeletePurge $a.syncWindows $a.orphanedResources (default dict $s.annotations).enabled -}}
 {{- if ne (len $keys) (len (uniq $keys)) -}}
-{{- fail (printf "annotation keys collide: the four annotations.* keys and scaffolding.annotations.enabled must all be distinct, got %v. A shared key makes the opt-in marker and an override read each other's value on the same Tenant." $keys) -}}
+{{- fail (printf "annotation keys collide: the annotations.* keys and scaffolding.annotations.enabled must all be distinct, got %v. A shared key makes the opt-in marker and an override read each other's value on the same Tenant." $keys) -}}
 {{- end -}}
 {{- end -}}
 
@@ -253,6 +253,32 @@ Application there may use another tenant's AppProject.
 {{- if contains $residue $expanded -}}
 {{- fail (printf "identity.groupPattern %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{ tier }} are substituted" $p $residue) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mto-extension-argocd.validateSyncAndOrphaned" -}}
+{{- $a := .Values.argocd | default dict -}}
+{{- if and (hasKey $a "syncWindows") (not (kindIs "invalid" $a.syncWindows)) (not (kindIs "slice" $a.syncWindows)) -}}
+{{- fail (printf "argocd.syncWindows must be a list of windows, got %s" (kindOf $a.syncWindows)) -}}
+{{- end -}}
+{{- /* The chart default reaches every tenant, so a bad schedule or duration
+       here would fail every child. The child checks the rest of each window. */ -}}
+{{- range $w := $a.syncWindows | default list -}}
+{{- if not (kindIs "map" $w) -}}
+{{- fail (printf "argocd.syncWindows entries must be objects, got %s" (kindOf $w)) -}}
+{{- end -}}
+{{- $sch := index $w "schedule" -}}
+{{- $dur := index $w "duration" -}}
+{{- if not (and (kindIs "string" $sch) (regexMatch "^\\s*[0-9A-Za-z*?/,-]+(\\s+[0-9A-Za-z*?/,-]+){4}\\s*$" $sch)) -}}
+{{- fail (printf "argocd.syncWindows: schedule %v must be a cron expression with five fields: minute hour day-of-month month day-of-week" $sch) -}}
+{{- end -}}
+{{- if not (and (kindIs "string" $dur) (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $dur)) -}}
+{{- fail (printf "argocd.syncWindows: duration %v must be a Go duration, such as 8h or 1h30m" $dur) -}}
+{{- end -}}
+{{- end -}}
+{{- $o := $a.orphanedResources | default "off" | toString -}}
+{{- if not (has $o (list "off" "warn" "monitor")) -}}
+{{- fail (printf "argocd.orphanedResources must be one of off, warn, monitor -- got %q" $o) -}}
 {{- end -}}
 {{- end -}}
 
