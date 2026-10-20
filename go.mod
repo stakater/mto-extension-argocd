@@ -1,4 +1,4 @@
-module github.com/stakater-ab/mto-extension-argocd
+module github.com/stakater/mto-extension-argocd
 
 go 1.26.5
 

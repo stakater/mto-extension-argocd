@@ -28,6 +28,6 @@ keywords:
   - argocd
   - multi-tenant-operator
   - template-operator-v2
-home: https://github.com/stakater-ab/mto-extension-argocd
+home: https://github.com/stakater/mto-extension-argocd
 sources:
-  - https://github.com/stakater-ab/mto-extension-argocd
+  - https://github.com/stakater/mto-extension-argocd
