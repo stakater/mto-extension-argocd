@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
+	"github.com/stakater/mto-extension-argocd/tests/internal/helm"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stakater-ab/mto-extension-argocd/tests/internal/helm"
+	"github.com/stakater/mto-extension-argocd/tests/internal/helm"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
