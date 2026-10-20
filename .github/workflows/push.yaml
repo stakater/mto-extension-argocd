@@ -42,7 +42,7 @@ jobs:
       - name: Package and push the chart
         run: make helm-release
         env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_USERNAME: stakater-user
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
       # A red main here means the chart did not ship -- either the tests broke
