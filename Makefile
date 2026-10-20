@@ -17,7 +17,7 @@ HELM ?= $(LOCALBIN)/helm
 HELM_VERSION ?= v3.16.3
 
 # Where helm-release publishes. Same registry as the other extension charts.
-HELM_REGISTRY ?= ghcr.io/stakater/charts
+HELM_REGISTRY ?= ghcr.io/stakater/public/charts
 
 # Registry credentials. GHCR_* is what push.yaml sets; GIT_* is the local
 # override so a developer can push to their own registry without exporting
