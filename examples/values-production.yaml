@@ -77,12 +77,14 @@ integrationConfig:
   namespace: multi-tenant-operator
 
 # The ServiceAccount template-operator-v2 runs as. Must match your install, or
-# nothing has permission to create AppProjects.
+# nothing has permission to create AppProjects. These are the chart defaults,
+# for template-operator-v2 deployed by MTO; a standalone release runs as an
+# account named after the release, in the release namespace.
 rbac:
   create: true
   serviceAccount:
-    name: template-operator-v2
-    namespace: stakater-template-operator
+    name: tenant-operator-template-operator-v2
+    namespace: multi-tenant-operator
 
 # Defaults shown for clarity -- both are already the chart's defaults.
 #

@@ -410,6 +410,45 @@ func TestTenantCannotCollideWithTheParentTemplateInstance(t *testing.T) {
 	}
 }
 
+// #29. The AppProject is named after the Tenant and applied with
+// ForceOwnership, so a Tenant called `default` took over ArgoCD's built-in
+// catch-all project: narrowed to one tenant, and deleted with the Tenant under
+// purge. A reserved name must fail its own child -- which applies nothing --
+// and leave every other tenant alone. `default` stays reserved when the value
+// lists other names, so it cannot be configured away.
+func TestTenantCannotTakeOverAReservedAppProject(t *testing.T) {
+	f := Fixture{
+		Values: map[string]any{
+			"argocd":      map[string]any{"namespace": "argo-cd", "reservedProjectNames": []any{"platform"}},
+			"scaffolding": map[string]any{"mode": "Always"},
+		},
+		Cluster: map[string]any{
+			"tenants": []any{
+				map[string]any{"metadata": map[string]any{"name": "default"}, "spec": map[string]any{}},
+				map[string]any{"metadata": map[string]any{"name": "platform"}, "spec": map[string]any{}},
+				map[string]any{"metadata": map[string]any{"name": "acme"}, "spec": map[string]any{}},
+			},
+			"namespaces": []any{},
+			"integrationConfig": map[string]any{
+				"accessControl": map[string]any{"privileged": map[string]any{"namespaces": []any{}, "groups": []any{}}},
+			},
+		},
+		ExpectChildErrors: map[string]string{
+			"mto-argocd-tenant-default":  `AppProject name "default" is reserved`,
+			"mto-argocd-tenant-platform": `AppProject name "platform" is reserved`,
+		},
+	}
+	out, errs := TwoStage(t, f)
+	AssertChildErrors(t, f, errs)
+	docs, err := Documents(out)
+	if err != nil {
+		t.Fatalf("decoding AppProjects: %v", err)
+	}
+	if len(docs) != 1 || meta(docs[0])["name"] != "acme" {
+		t.Errorf("rendered %d AppProjects, want only acme's:\n%s", len(docs), out)
+	}
+}
+
 // `fromJson` exists in BOTH Helm and template-operator-v2 with different
 // semantics -- it decodes a top-level array in the operator and refuses one in
 // Helm -- so it is the one divergence the structural guard cannot catch: the

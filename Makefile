@@ -147,10 +147,11 @@ e2e-test: helm ## Run the E2E suite against a live cluster. Requires KUBE_CONTEX
 # idempotent, so re-running after a failure reuses what is already up.
 #
 # The namespaces below are the CHART DEFAULTS on purpose -- operatorNamespace
-# and integrationConfig.namespace both default to multi-tenant-operator, and
-# rbac.serviceAccount.namespace to stakater-template-operator. The kind install
-# therefore passes only argocd.namespace, which has no default, so the E2E run
-# exercises the values a customer gets rather than a bespoke set.
+# and integrationConfig.namespace both default to multi-tenant-operator -- so
+# the E2E run exercises the values a customer gets rather than a bespoke set.
+# The one exception is rbac.serviceAccount: its default is the account MTO
+# runs template-operator-v2 as, and this lane installs a standalone release, so
+# the suite binds the RBAC to E2E_TOV2_SA instead.
 
 CONTAINER_TOOL ?= docker
 KUBECTL ?= kubectl

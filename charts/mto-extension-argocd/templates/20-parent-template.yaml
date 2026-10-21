@@ -45,6 +45,11 @@ spec:
       value: {{ (.Values.argocd).syncWindows | default list | toJson | quote }}
     - name: defaultOrphanedResources
       value: {{ (.Values.argocd).orphanedResources | default "off" | toString | quote }}
+    {{- /* #29: AppProject names no Tenant may take; `default` is added by
+           the parent gotemplate, so it cannot be configured away. */}}
+    {{- include "mto-extension-argocd.validateReservedProjectNames" . }}
+    - name: reservedProjectNamesJson
+      value: {{ (.Values.argocd).reservedProjectNames | default list | toJson | quote }}
     {{- /* #9: the tenant's Application namespace. */}}
     - name: sourceNamespacesEnabled
       value: {{ ((.Values.argocd).sourceNamespaces).enabled | default false | toString | quote }}

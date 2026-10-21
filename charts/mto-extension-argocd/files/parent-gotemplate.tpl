@@ -44,6 +44,11 @@ filtering happens in exactly one place.
 {{- $allowCP := eq .parameters.allowControlPlaneDestination "true" }}
 {{- $snOn := eq .parameters.sourceNamespacesEnabled "true" }}
 {{- $snPattern := .parameters.sourceNamespacesPattern }}
+{{- /* #29. The AppProject is named after the Tenant, so these names would
+       take over a project the chart does not own. ArgoCD's built-in
+       `default` is added here, not in values, so it cannot be configured
+       away. */ -}}
+{{- $reserved := concat (list "default") (mustFromJson .parameters.reservedProjectNamesJson) }}
 {{- /*
 Read the IntegrationConfig shallowly and dig. The parameter resolves the whole
 .spec as a map; a deep jsonPath like .spec.accessControl.privileged fails the
@@ -248,6 +253,15 @@ spec:
       value: {{ $swJson | quote }}
     - name: orphanedResources
       value: {{ $or | quote }}
+{{- /* #29. A reserved name still gets a child, and the refusal is passed
+       down like the source-namespace ones below: the child fails, so one
+       tenant breaks, not the fleet. No child would read as "stop managing":
+       tov2 would reap a child that already rendered, and release or delete
+       the project it took over. A failing child applies nothing. */ -}}
+{{- $nameRefused := list }}
+{{- if has $name $reserved }}{{- $nameRefused = list (printf "AppProject name %q is reserved (ArgoCD's default, or argocd.reservedProjectNames): this Tenant would take over an AppProject the chart does not own" $name) }}{{- end }}
+    - name: projectNameRefusedJson
+      value: {{ toJson $nameRefused | quote }}
 {{- /* #9. The tenant's Application namespace, checked here because only the
        parent sees the privileged patterns. A refusal is passed down, not
        acted on: the child fails, so one tenant breaks, not the fleet.

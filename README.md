@@ -83,7 +83,7 @@ it is kept or deleted depends on your template-operator-v2 version, see
 | | |
 |---|---|
 | [multi-tenant-operator][mto] | `Tenant` v1beta3 and `IntegrationConfig` v1beta1 |
-| [template-operator-v2][tov2] | v0.0.5 or later. `sync.mode: strict`, the default, needs the sync webhook (v0.0.3 or later; v0.0.6 or later on OpenShift without cert-manager). `onDeletePurgeAppProject: false`, the default, retains AppProjects only on v0.0.7 or later — on v0.0.6 and earlier they are deleted, see [What deletes an AppProject](#what-deletes-an-appproject) |
+| [template-operator-v2][tov2] | v0.0.5 or later. `sync.mode: strict`, the default, needs the sync webhook (v0.0.3 or later; v0.0.6 or later on OpenShift without cert-manager). `onDeletePurgeAppProject: false`, the default, retains AppProjects only on v0.0.7 or later — on v0.0.6 and earlier they are deleted, see [What deletes an AppProject](#what-deletes-an-appproject). MTO 1.10 deploys v0.0.8. The render tests use the v0.0.8 template engine (`missingkey=error`); `make e2e-kind` installs v0.0.6 unless you set `TOV2_CHART_VERSION` |
 | ArgoCD | `argoproj.io/v1alpha1` `AppProject`; 3.x, tested on 3.5.4. See [ArgoCD versions](#argocd-versions) |
 | Kubernetes | 1.33+ tested. tov2's CRDs do not install on 1.31 |
 
@@ -102,13 +102,35 @@ OpenShift GitOps 1.22 ships ArgoCD 3.5.3, 1.21 ships 3.4.3, 1.20 ships 3.3.2.
 
 ## Quick start
 
-**1. Install.** `argocd.namespace` is required and has no default:
+**1. Install.** `argocd.namespace` is required and has no default.
+`rbac.serviceAccount` must be the ServiceAccount template-operator-v2 runs as:
 
 ```bash
 helm install mto-extension-argocd ./charts/mto-extension-argocd \
   --namespace multi-tenant-operator \
-  --set argocd.namespace=openshift-gitops
+  --set argocd.namespace=openshift-gitops \
+  --set rbac.serviceAccount.namespace=multi-tenant-operator \
+  --set rbac.serviceAccount.name=tenant-operator-template-operator-v2
 ```
+
+The ServiceAccount values above are the defaults. They match
+template-operator-v2 deployed by MTO (IntegrationConfig
+`components.templateOperatorV2.mode: Managed`). A standalone Helm release of
+template-operator-v2 runs as an account named after the release, in the
+release namespace. Find it with:
+
+```bash
+kubectl get deploy -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SA:.spec.template.spec.serviceAccountName' \
+  | grep template-operator-v2
+```
+
+With the wrong account the install succeeds, but nothing is reconciled: the
+chart's RBAC goes to an account that does not run anything. The parent
+TemplateInstance then reports `cannot list resource "tenants"`.
+
+Before 0.8.0 the default was `stakater-template-operator/template-operator-v2`.
+If you run a standalone template-operator-v2, set both values before you
+upgrade.
 
 Nothing is scaffolded yet — `scaffolding.mode` defaults to `OnAnnotation`.
 
@@ -150,10 +172,11 @@ are the whole mechanism:
 
 With `rbac.create: true`, the default, the chart also installs eight RBAC
 objects — two ClusterRoles, one ClusterRoleBinding, two Roles and three
-RoleBindings (one of them the AppProject-write binding in `argocd.namespace`,
-which is what confines mutation to that namespace) — granting
-template-operator-v2 the least privilege those three need
-([00-rbac.yaml](charts/mto-extension-argocd/templates/00-rbac.yaml)).
+RoleBindings — granting template-operator-v2 the least privilege those three
+need ([00-rbac.yaml](charts/mto-extension-argocd/templates/00-rbac.yaml)). The
+AppProject-write binding is in `argocd.namespace`, so the operator can write
+AppProjects only there. It does not limit *who* can make the operator write
+them: see [Security defaults](#security-defaults).
 
 ```text
 Tenant ───────────┐
@@ -186,12 +209,14 @@ Full reference with rationale in
 | Value | Default | |
 |---|---|---|
 | `argocd.namespace` | — | **Required.** Where AppProjects are created |
+| `rbac.serviceAccount` | `multi-tenant-operator/tenant-operator-template-operator-v2` | The account template-operator-v2 runs as. The default is the one MTO deploys it with — see [Quick start](#quick-start) |
 | `scaffolding.mode` | `OnAnnotation` | `Always`, `OnLabel`, `OnAnnotation`, `Never` |
 | `argocd.sourceRepos.pattern` | `[]` | Per-tenant repo patterns, one sourceRepos entry each; `{{ tenant }}` is expanded |
 | `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage — read [Cluster-scoped kinds](#cluster-scoped-kinds) first |
 | `argocd.namespaceResourceBlacklist` | `[]` | Namespaced kinds they may not |
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |
+| `argocd.reservedProjectNames` | `[]` | AppProject names no Tenant may take, in addition to `default` — see [Security defaults](#security-defaults) |
 | `argocd.allowClusterResourceNames` | `false` | Allow `name` on whitelist entries. Set it only on ArgoCD 3.3+ |
 | `roles.profile` | `leastPrivilege` | Or `extensionsCompatible`, the legacy shape |
 | `argocd.syncWindows` | `[]` | [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) on every AppProject |
@@ -254,6 +279,29 @@ are substituted; any other placeholder, a plain string instead of a list, or
 an empty entry is refused at install time rather than shipped into a live
 AppProject.
 
+ArgoCD reads `sourceRepos` as globs, one path segment at a time. So the chart
+refuses a glob in the same path segment as `{{ tenant }}`:
+`https://github.com/acme/{{ tenant }}-*` for `team-a` is `team-a-*`, which
+also matches the repos of a tenant called `team-a-ext`. It also refuses `**`
+in or before that segment, because `**` matches across segments. Put the glob
+in another segment, for example `https://github.com/acme/{{ tenant }}/*` or
+`https://gitlab.com/acme/{{ tenant }}/**`, or list each repository. An entry
+without `{{ tenant }}` is the same for every tenant, so its globs are your
+decision.
+
+The chart also refuses a deny entry (`!…`). It does not narrow: ArgoCD counts
+a deny entry that does not match a repository as a match, so a project that
+lists `!X` permits every repository except `X`, every other tenant's included.
+
+The annotations are input with the same trust as chart values. They are not
+checked against the chart values: a `cluster-resource-whitelist` of
+`[{"group":"*","kind":"*"}]` or a `source-repos` of `["*"]` gives that tenant
+exactly that, and so does any `source-repos` entry that starts with `!`. MTO's
+tenant roles grant nothing on `tenants`, and the MTO console does not set
+annotations, so by default only cluster admins can set them. Keep it that way:
+whoever can change a Tenant's annotations controls that tenant's ArgoCD
+access.
+
 ## Security defaults
 
 Since chart **0.2.0** (#6, #7). Earlier versions — and the
@@ -289,6 +337,35 @@ the ArgoCD namespace leaves `destinations`, and the roles narrow. Applications
 that deploy *into* the ArgoCD namespace stop syncing; move them out of the
 control plane first, or set both compatibility values, upgrade, migrate, and
 remove them.
+
+**A Tenant cannot take over an AppProject by name** (since 0.8.0). The
+AppProject is named after the Tenant, and the apply takes ownership of every
+field the chart renders. A Tenant called `default` would replace ArgoCD's
+built-in catch-all project with its own, and delete it with the Tenant under
+purge. So `default` is always reserved, and `argocd.reservedProjectNames` adds
+the platform's own projects. A Tenant with a reserved name fails its own child:
+nothing is applied, the existing project does not change, and the error shows
+in the parent's status. Other tenants are not affected. If a Tenant took over
+a project before 0.8.0, its child now fails and the project keeps the shape the
+chart gave it. On template-operator-v2 v0.0.7 and later, remove that Tenant's
+opt-in with purge off: the project is released, and you can then restore it.
+On v0.0.6 and earlier, removing the opt-in **deletes** the project — for a
+Tenant called `default`, ArgoCD's own — so follow
+[docs/rollback.md](docs/rollback.md) first.
+
+**Template authors can use the chart's grants.** template-operator-v2 applies
+every Template with its own ServiceAccount, into any namespace the Template
+names. So the AppProject write that this chart grants to that account is
+available to anyone who can create a `Template` and a `TemplateInstance`
+(`templates.v2.stakater.com`), in any namespace. That user can render an
+AppProject with wide destinations and a role for their own group into the
+ArgoCD namespace, which is ArgoCD admin. This is how template-operator-v2 is
+designed: the boundary is RBAC on who may author Templates. MTO's tenant roles
+do not grant it. Keep Template and TemplateInstance create for cluster admins,
+and do not bind template-operator-v2's own editor or admin roles for
+`templates` and `templateinstances` to tenants. The chart's RBAC stays after
+`helm uninstall` (see [Uninstalling](#uninstalling)), so the grant stays until
+you delete it.
 
 ## Applications in the tenant's own namespace
 
@@ -550,7 +627,7 @@ These do **not** delete an AppProject:
 | Situation | What happens |
 |---|---|
 | A malformed override annotation on a Tenant | that tenant's child fails; its AppProject does not change |
-| A tenant loses all its namespaces | it keeps its AppProject, with the ArgoCD namespace as the only destination |
+| A tenant loses all its namespaces | it keeps its AppProject, with `destinations: []`. With `argocd.allowControlPlaneDestination: true`, the ArgoCD namespace is the only destination |
 | The parent cannot render, for example `integrationConfig.name` is wrong | children and AppProjects stay; tov2 keeps the last rendered set, so a broken `IntegrationConfig` cannot wipe the fleet |
 | A chart upgrade or a values change | each AppProject is updated in place; the UID does not change |
 

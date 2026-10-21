@@ -108,6 +108,18 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "non-list clusterResourceWhitelist",
 			json:    map[string]string{"argocd": `{"namespace":"argo-cd","clusterResourceWhitelist":"oops"}`},
 			wantErr: "argocd.clusterResourceWhitelist must be a list"},
+		// A scalar here fails the parent's `has` -- every tenant at once.
+		{name: "non-list reservedProjectNames",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","reservedProjectNames":"platform"}`},
+			wantErr: "argocd.reservedProjectNames must be a list"},
+		{name: "empty reservedProjectNames entry",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.reservedProjectNames": `["platform", ""]`},
+			wantErr: "argocd.reservedProjectNames entries must be non-empty strings"},
+		// #31, the skip-schema twin of TestSourceReposPatternRefusesGlobNextToTenant.
+		{name: "glob next to the sourceRepos placeholder",
+			sets:    map[string]string{"argocd.namespace": "argo-cd", "argocd.sourceRepos.pattern[0]": "https://github.com/acme/{{ tenant }}-*"},
+			wantErr: "glob in the same path segment as {{ tenant }}"},
 		// A malformed namespace name passes minLength but the API server rejects
 		// every rendered AppProject on cluster, late. Space + uppercase here.
 		{name: "malformed argocd.namespace",
@@ -575,6 +587,57 @@ func TestSourceReposPatternRejectsUnknownPlaceholder(t *testing.T) {
 	}
 }
 
+// #31. ArgoCD matches sourceRepos as globs with `/` as the separator, so a
+// glob in the tenant's own path segment reaches other tenants' repos:
+// "{{ tenant }}-*" for acme also matches acme-corp-gitops. So does `**` in or
+// before that segment, since it crosses segments. A glob in another segment,
+// `**` after the tenant and a literal entry stay allowed. A deny entry is
+// refused: ArgoCD counts a non-matching deny entry as a match, so "!X"
+// permits every repository except X.
+func TestSourceReposPatternRefusesGlobNextToTenant(t *testing.T) {
+	const sameSegment = "glob in the same path segment as {{ tenant }}"
+	const superGlob = "has ** in or before the {{ tenant }} segment"
+	const denyEntry = "is a deny entry"
+	for _, tc := range []struct {
+		pattern string
+		wantErr string // "" when the pattern is valid
+	}{
+		{"https://github.com/org/{{ tenant }}/*", ""},
+		{"https://github.com/org/{{tenant}}-gitops/*", ""},
+		{"https://gitlab.example.com/{{ tenant }}/apps/*.git", ""},
+		{"https://github.com/*/{{ tenant }}", ""},              // * stays in its own segment
+		{"https://github.com/org/shared-*", ""},                // no placeholder: a literal, the platform's own choice
+		{"https://github.com/**", ""},                          // the same
+		{"https://github.com/org/{{ tenant }}-*", sameSegment}, // the issue's example
+		{"https://github.com/org/{{tenant}}*", sameSegment},
+		{"https://github.com/org/*{{ tenant }}", sameSegment},
+		{"https://github.com/org/{{ tenant }}?", sameSegment},
+		{"https://github.com/org/{{ tenant }}-[a-z]", sameSegment},
+		{"https://github.com/org/{{ tenant }}-{gitops}", sameSegment}, // alternation; a comma would split --set
+		{"https://github.com/org/{{ tenant }}/{{ tenant }}-*", sameSegment},
+		{"https://gitlab.com/org/{{ tenant }}/**", ""}, // every match starts with org/acme/
+		{"https://github.com/org/**/{{ tenant }}", superGlob},
+		{"https://github.com/org/**/{{ tenant }}/**", superGlob},    // org/acme/acme-corp/x matches acme and acme-corp
+		{"!https://github.com/org/{{ tenant }}-secrets", denyEntry}, // permits every other repo
+		{"!https://github.com/org/shared", denyEntry},               // even without a placeholder
+	} {
+		t.Run(tc.pattern, func(t *testing.T) {
+			_, err := HelmTemplate(t, "", map[string]string{
+				"argocd.namespace":              "openshift-gitops",
+				"argocd.sourceRepos.pattern[0]": tc.pattern,
+			})
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("pattern should be accepted: %v", err)
+			case tc.wantErr != "" && err == nil:
+				t.Error("pattern was accepted; it would match another tenant's repos")
+			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
 // The parent aggregates each child's status so one object answers for the whole
 // fleet: ready to alert on, reason to group by, errors to read.
 func TestParentAggregatesReadyStatusReasonAndErrors(t *testing.T) {
@@ -662,6 +725,33 @@ func TestRBACNamesAreFixed(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("RBAC objects for release %s in %s\n got  %v\n want %v", r.release, r.namespace, got, want)
 		}
+	}
+}
+
+// #27. By default every binding goes to the account MTO runs
+// template-operator-v2 as (components.templateOperatorV2.mode: Managed). The
+// old default named a standalone install's account, so on an MTO-managed
+// operator the install succeeded and nothing was ever reconciled.
+func TestRBACDefaultsToTheMTOManagedServiceAccount(t *testing.T) {
+	docs := MustHelmTemplate(t, "", map[string]string{"argocd.namespace": "openshift-gitops"})
+	n := 0
+	for _, d := range docs {
+		kind, _ := d["kind"].(string)
+		if !strings.HasSuffix(kind, "Binding") {
+			continue
+		}
+		n++
+		subjects, _ := d["subjects"].([]any)
+		if len(subjects) != 1 {
+			t.Fatalf("%s/%v has %d subjects, want 1", kind, meta(d)["name"], len(subjects))
+		}
+		s, _ := subjects[0].(map[string]any)
+		if s["kind"] != "ServiceAccount" || s["namespace"] != "multi-tenant-operator" || s["name"] != "tenant-operator-template-operator-v2" {
+			t.Errorf("%s/%v binds %v, want ServiceAccount multi-tenant-operator/tenant-operator-template-operator-v2", kind, meta(d)["name"], s)
+		}
+	}
+	if n != 4 {
+		t.Errorf("checked %d bindings, want 4", n)
 	}
 }
 

@@ -12,7 +12,9 @@ this chart's grants to release/delete the AppProjects and reap the children, so
 if the RBAC goes first everything deadlocks in Terminating. Retained
 under both tear-down tools, which honour different annotations: resource-policy
 for `helm uninstall`, sync-options (Prune=false,Delete=false) for an ArgoCD app
-prune/delete. Harmless once the projects drain; NOTES.txt has the cleanup line.
+prune/delete. Not harmless once the projects drain: it is a standing grant
+that any Template author can use (README, Security defaults), so NOTES.txt has
+the cleanup commands.
 */ -}}
 {{- define "mto-extension-argocd.retainAnnotations" -}}
 helm.sh/resource-policy: keep
@@ -74,6 +76,35 @@ visible at install time.
 {{- fail (printf "argocd.sourceRepos.pattern entry %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
 {{- end -}}
 {{- end -}}
+{{- /* A deny entry ("!...") is not a narrowing. ArgoCD's IsSourcePermitted
+       counts a deny entry that does NOT match the source as a match, so a
+       project listing "!X" permits every repository except X -- every other
+       tenant's included. */ -}}
+{{- if hasPrefix "!" $norm -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q is a deny entry. ArgoCD permits every repository a deny entry does not name, so it would give every tenant every other tenant's repos. List the repositories each tenant may use instead" $p) -}}
+{{- end -}}
+{{- /* #31. ArgoCD matches sourceRepos as globs with `/` as the separator,
+       so `*` stays inside one path segment. A glob in the tenant's own
+       segment therefore reaches other tenants' repos: "{{ tenant }}-*" for
+       acme is acme-*, which also matches acme-corp-gitops. `**` matches
+       across segments, so before the tenant it can move the tenant's
+       segment; after it, it cannot. With the tenant's segment literal and no
+       `**` before it, a glob cannot stretch one tenant's name into
+       another's. */ -}}
+{{- if contains "{{ tenant }}" $norm -}}
+{{- $afterTenant := false -}}
+{{- range $seg := splitList "/" $norm -}}
+{{- if and (not $afterTenant) (contains "**" $seg) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q has ** in or before the {{ tenant }} segment. ** matches across path segments, so it can match another tenant's repos. Put it after the tenant, for example https://gitlab.com/org/{{ tenant }}/**, or list each repository" $p) -}}
+{{- end -}}
+{{- if contains "{{ tenant }}" $seg -}}
+{{- if regexMatch `[*?\[{]` (replace "{{ tenant }}" "" $seg) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q has a glob in the same path segment as {{ tenant }}. ArgoCD matches sourceRepos as globs, so for tenant acme \"{{ tenant }}-*\" also matches the repos of a tenant called acme-corp. Put the glob in another segment, for example https://github.com/org/{{ tenant }}/*, or list each repository" $p) -}}
+{{- end -}}
+{{- $afterTenant = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -118,7 +149,7 @@ and the failure mode here is the quietest in the chart: an empty key makes
 on-delete-purge, which decides whether an AppProject survives deletion) is
 silently ignored and the chart default silently wins. Nothing ever errors.
 An empty tenantNamespaceLabel is the same shape: no namespace ever matches,
-and every tenant renders with no destinations except the ArgoCD namespace.
+and every tenant renders with no destinations.
 */ -}}
 {{- define "mto-extension-argocd.validateOverrideKeys" -}}
 {{- $a := .Values.annotations | default dict -}}
@@ -138,7 +169,7 @@ and every tenant renders with no destinations except the ArgoCD namespace.
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "scaffolding.labels.enabled" "value" (default dict $s.labels).enabled) -}}
 {{- if not .Values.tenantNamespaceLabel -}}
-{{- fail "tenantNamespaceLabel must be a non-empty label key; an empty key matches no Namespace, so every tenant's AppProject silently loses every destination except the ArgoCD namespace" -}}
+{{- fail "tenantNamespaceLabel must be a non-empty label key; an empty key matches no Namespace, so every tenant's AppProject silently loses every destination" -}}
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "tenantNamespaceLabel" "value" .Values.tenantNamespaceLabel) -}}
 {{- end -}}
@@ -189,6 +220,23 @@ into [].
 {{- if and (not (kindIs "invalid" $v)) (not (kindIs "slice" $v)) -}}
 {{- fail (printf "argocd.%s must be a list of {group, kind} entries, got %s" $k (kindOf $v)) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+#29. Same skippable-schema reasoning. A scalar here would make the parent's
+mustFromJson yield a string and `has` fail the parent -- every tenant at once.
+An empty entry reserves nothing and reads as a mistake.
+*/ -}}
+{{- define "mto-extension-argocd.validateReservedProjectNames" -}}
+{{- $r := (.Values.argocd).reservedProjectNames -}}
+{{- if and (not (kindIs "invalid" $r)) (not (kindIs "slice" $r)) -}}
+{{- fail (printf "argocd.reservedProjectNames must be a list of AppProject names, got %s" (kindOf $r)) -}}
+{{- end -}}
+{{- range $n := $r | default list -}}
+{{- if or (not (kindIs "string" $n)) (eq $n "") -}}
+{{- fail (printf "argocd.reservedProjectNames entries must be non-empty strings, got %s %v" (kindOf $n) $n) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

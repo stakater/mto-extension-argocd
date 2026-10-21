@@ -7,6 +7,15 @@ mto-extension-argocd {{ .Chart.Version }} installed into {{ .Values.operatorName
 
 AppProjects are rendered into: {{ (.Values.argocd).namespace }}
 Scaffolding mode:              {{ $mode }}
+{{- if (.Values.rbac).create }}
+RBAC is bound to:              {{ ((.Values.rbac).serviceAccount).namespace }}/{{ ((.Values.rbac).serviceAccount).name }}
+
+That must be the ServiceAccount template-operator-v2 runs as, or nothing is
+reconciled. Check it with:
+
+  kubectl get deploy -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SA:.spec.template.spec.serviceAccountName' \
+    | grep template-operator-v2
+{{ end }}
 {{ if eq $mode "OnAnnotation" -}}
 Opt a tenant in with:
 
@@ -52,9 +61,11 @@ build and on onDeletePurgeAppProject. With the default (retain) on
 template-operator-v2 v0.0.7 and later they are RELEASED and survive;
 on v0.0.6 and earlier they are DELETED, because retain is not enforceable there.
 
-The retained RBAC is deliberately left behind -- it is harmless once the
-projects have drained, and it is re-adopted automatically on a same-name
-reinstall. Remove it explicitly only when you want it gone:
+The retained RBAC is deliberately left behind, and it is re-adopted
+automatically on a same-name reinstall. It is still a live grant after the
+projects have drained: template-operator-v2 can write AppProjects in
+{{ (.Values.argocd).namespace }}, and anyone who can create a Template can use that
+(README, "Security defaults"). Once you are not reinstalling, remove it:
 
   kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance={{ .Release.Name }}
   kubectl delete role,rolebinding mto-extension-argocd-children \

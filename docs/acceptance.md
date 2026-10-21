@@ -24,9 +24,18 @@ an `acme` Application whose source contains an `AppProject`, `Application` or
 repository Secret for `openshift-gitops` synced; from 0.2.0 it is refused.
 
 **AC-ISO-4 — Source repositories are the tenant's.** *(R)* ✅ `sourceRepos` come
-from per-tenant patterns only.
+from per-tenant patterns only. A pattern with a glob in the `{{ tenant }}`
+path segment, or with `**` in or before it, is refused, because `acme-*` also
+matches `acme-corp`'s repos. A deny entry (`!…`) is refused too: Argo CD
+permits every repository a deny entry does not name
+(`TestSourceReposPatternRefusesGlobNextToTenant`).
 
 **AC-ISO-5 — Malformed input fails one tenant, never the fleet.** *(R)* ✅
+
+**AC-ISO-6 — A Tenant cannot take over an AppProject the chart does not own.**
+*(R)* ✅ A Tenant named `default`, or a name in `argocd.reservedProjectNames`,
+fails its own child and renders nothing; the other tenants render
+(`TestTenantCannotTakeOverAReservedAppProject`).
 
 ## Access
 

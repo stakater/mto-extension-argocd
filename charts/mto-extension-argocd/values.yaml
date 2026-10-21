@@ -75,6 +75,18 @@ argocd:
     enabled: false
     pattern: "{{ tenant }}-argocd"
 
+  # AppProject names no Tenant may take (#29). The AppProject is named after
+  # the Tenant and applied server-side with ForceOwnership, so a Tenant called
+  # `default` would take over ArgoCD's built-in catch-all project: narrow it to
+  # one tenant's destinations and roles, and delete it with the Tenant when
+  # purge is on. `default` is always reserved. Add the platform's own projects
+  # here.
+  #
+  # A Tenant with a reserved name fails its own child, so the existing
+  # AppProject is not touched, and the refusal shows in the parent's status.
+  # Other tenants are not affected.
+  reservedProjectNames: []
+
   # Sync impersonation (#15). When enabled, every AppProject maps each tenant
   # namespace to `serviceAccount` IN that namespace, so ArgoCD syncs as that
   # account instead of its own cluster-admin controller. One entry per tenant
@@ -368,7 +380,19 @@ rbac:
   # Create the ClusterRoles/Bindings that let template-operator-v2 manage
   # AppProjects. Turn off only if you bind them yourself.
   create: true
-  # The ServiceAccount template-operator-v2 runs as.
+  # The ServiceAccount template-operator-v2 runs as. Every grant above is bound
+  # to it, so a wrong value installs cleanly and then reconciles nothing: the
+  # parent reports that the account the operator really runs as `cannot list
+  # resource "tenants"` (#27).
+  #
+  # The default is the account MTO deploys template-operator-v2 with
+  # (IntegrationConfig components.templateOperatorV2.mode: Managed). A
+  # standalone Helm release of template-operator-v2 runs as an account named
+  # after the release, in the release namespace -- for example
+  # template-operator-v2 in stakater-template-operator. To find it:
+  #
+  #   kubectl get deploy -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SA:.spec.template.spec.serviceAccountName' \
+  #     | grep template-operator-v2
   serviceAccount:
-    name: template-operator-v2
-    namespace: stakater-template-operator
+    name: tenant-operator-template-operator-v2
+    namespace: multi-tenant-operator
