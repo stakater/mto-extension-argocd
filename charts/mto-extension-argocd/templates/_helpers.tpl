@@ -12,7 +12,9 @@ this chart's grants to release/delete the AppProjects and reap the children, so
 if the RBAC goes first everything deadlocks in Terminating. Retained
 under both tear-down tools, which honour different annotations: resource-policy
 for `helm uninstall`, sync-options (Prune=false,Delete=false) for an ArgoCD app
-prune/delete. Harmless once the projects drain; NOTES.txt has the cleanup line.
+prune/delete. Not harmless once the projects drain: it is a standing grant
+that any Template author can use (README, Security defaults), so NOTES.txt has
+the cleanup commands.
 */ -}}
 {{- define "mto-extension-argocd.retainAnnotations" -}}
 helm.sh/resource-policy: keep
@@ -147,7 +149,7 @@ and the failure mode here is the quietest in the chart: an empty key makes
 on-delete-purge, which decides whether an AppProject survives deletion) is
 silently ignored and the chart default silently wins. Nothing ever errors.
 An empty tenantNamespaceLabel is the same shape: no namespace ever matches,
-and every tenant renders with no destinations except the ArgoCD namespace.
+and every tenant renders with no destinations.
 */ -}}
 {{- define "mto-extension-argocd.validateOverrideKeys" -}}
 {{- $a := .Values.annotations | default dict -}}
@@ -167,7 +169,7 @@ and every tenant renders with no destinations except the ArgoCD namespace.
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "scaffolding.labels.enabled" "value" (default dict $s.labels).enabled) -}}
 {{- if not .Values.tenantNamespaceLabel -}}
-{{- fail "tenantNamespaceLabel must be a non-empty label key; an empty key matches no Namespace, so every tenant's AppProject silently loses every destination except the ArgoCD namespace" -}}
+{{- fail "tenantNamespaceLabel must be a non-empty label key; an empty key matches no Namespace, so every tenant's AppProject silently loses every destination" -}}
 {{- end -}}
 {{- include "mto-extension-argocd.assertLabelKey" (dict "field" "tenantNamespaceLabel" "value" .Values.tenantNamespaceLabel) -}}
 {{- end -}}
