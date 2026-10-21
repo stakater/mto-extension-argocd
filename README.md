@@ -278,6 +278,20 @@ are substituted; any other placeholder, a plain string instead of a list, or
 an empty entry is refused at install time rather than shipped into a live
 AppProject.
 
+ArgoCD reads `sourceRepos` as globs, one path segment at a time. So the chart
+refuses a glob in the same path segment as `{{ tenant }}`:
+`https://github.com/acme/{{ tenant }}-*` for `team-a` is `team-a-*`, which
+also matches the repos of a tenant called `team-a-ext`. It also refuses `**`
+in or before that segment, because `**` matches across segments. Put the glob
+in another segment, for example `https://github.com/acme/{{ tenant }}/*` or
+`https://gitlab.com/acme/{{ tenant }}/**`, or list each repository. An entry
+without `{{ tenant }}` is the same for every tenant, so its globs are your
+decision.
+
+The chart also refuses a deny entry (`!…`). It does not narrow: ArgoCD counts
+a deny entry that does not match a repository as a match, so a project that
+lists `!X` permits every repository except `X`, every other tenant's included.
+
 ## Security defaults
 
 Since chart **0.2.0** (#6, #7). Earlier versions — and the

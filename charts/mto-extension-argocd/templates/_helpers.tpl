@@ -74,6 +74,35 @@ visible at install time.
 {{- fail (printf "argocd.sourceRepos.pattern entry %q contains an unrecognised placeholder (%q); only {{ tenant }} and {{tenant}} are substituted" $p $residue) -}}
 {{- end -}}
 {{- end -}}
+{{- /* A deny entry ("!...") is not a narrowing. ArgoCD's IsSourcePermitted
+       counts a deny entry that does NOT match the source as a match, so a
+       project listing "!X" permits every repository except X -- every other
+       tenant's included. */ -}}
+{{- if hasPrefix "!" $norm -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q is a deny entry. ArgoCD permits every repository a deny entry does not name, so it would give every tenant every other tenant's repos. List the repositories each tenant may use instead" $p) -}}
+{{- end -}}
+{{- /* #31. ArgoCD matches sourceRepos as globs with `/` as the separator,
+       so `*` stays inside one path segment. A glob in the tenant's own
+       segment therefore reaches other tenants' repos: "{{ tenant }}-*" for
+       acme is acme-*, which also matches acme-corp-gitops. `**` matches
+       across segments, so before the tenant it can move the tenant's
+       segment; after it, it cannot. With the tenant's segment literal and no
+       `**` before it, a glob cannot stretch one tenant's name into
+       another's. */ -}}
+{{- if contains "{{ tenant }}" $norm -}}
+{{- $afterTenant := false -}}
+{{- range $seg := splitList "/" $norm -}}
+{{- if and (not $afterTenant) (contains "**" $seg) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q has ** in or before the {{ tenant }} segment. ** matches across path segments, so it can match another tenant's repos. Put it after the tenant, for example https://gitlab.com/org/{{ tenant }}/**, or list each repository" $p) -}}
+{{- end -}}
+{{- if contains "{{ tenant }}" $seg -}}
+{{- if regexMatch `[*?\[{]` (replace "{{ tenant }}" "" $seg) -}}
+{{- fail (printf "argocd.sourceRepos.pattern entry %q has a glob in the same path segment as {{ tenant }}. ArgoCD matches sourceRepos as globs, so for tenant acme \"{{ tenant }}-*\" also matches the repos of a tenant called acme-corp. Put the glob in another segment, for example https://github.com/org/{{ tenant }}/*, or list each repository" $p) -}}
+{{- end -}}
+{{- $afterTenant = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
