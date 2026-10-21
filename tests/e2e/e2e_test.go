@@ -580,14 +580,34 @@ func TestLeastPrivilegeDelta(t *testing.T) {
 // ------------------------------------------------------------------- helpers
 
 func helmArgs(extra ...string) []string {
-	return append([]string{
+	args := []string{
 		"--kube-context", kubeContext,
 		"-n", operatorNS,
 		"--set", "argocd.namespace=" + argoNS,
 		"--set", "operatorNamespace=" + operatorNS,
 		"--set", "integrationConfig.namespace=" + operatorNS,
 		"--set", "scaffolding.mode=OnAnnotation",
-	}, extra...)
+	}
+	// The chart's rbac.serviceAccount default is the account MTO runs
+	// template-operator-v2 as. The kind lane installs a standalone release
+	// instead, so it names the real account through E2E_TOV2_SA; without it
+	// the chart's grants go to an account that does not exist (#27).
+	if ns, name, ok := serviceAccountParts(os.Getenv("E2E_TOV2_SA")); ok {
+		args = append(args,
+			"--set", "rbac.serviceAccount.namespace="+ns,
+			"--set", "rbac.serviceAccount.name="+name,
+		)
+	}
+	return append(args, extra...)
+}
+
+// serviceAccountParts splits system:serviceaccount:<ns>:<name>.
+func serviceAccountParts(user string) (ns, name string, ok bool) {
+	parts := strings.Split(user, ":")
+	if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" || parts[2] == "" || parts[3] == "" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
 }
 
 // helmInstall and helmUpgrade take the same extras so a test can install with

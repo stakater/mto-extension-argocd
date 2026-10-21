@@ -665,6 +665,33 @@ func TestRBACNamesAreFixed(t *testing.T) {
 	}
 }
 
+// #27. By default every binding goes to the account MTO runs
+// template-operator-v2 as (components.templateOperatorV2.mode: Managed). The
+// old default named a standalone install's account, so on an MTO-managed
+// operator the install succeeded and nothing was ever reconciled.
+func TestRBACDefaultsToTheMTOManagedServiceAccount(t *testing.T) {
+	docs := MustHelmTemplate(t, "", map[string]string{"argocd.namespace": "openshift-gitops"})
+	n := 0
+	for _, d := range docs {
+		kind, _ := d["kind"].(string)
+		if !strings.HasSuffix(kind, "Binding") {
+			continue
+		}
+		n++
+		subjects, _ := d["subjects"].([]any)
+		if len(subjects) != 1 {
+			t.Fatalf("%s/%v has %d subjects, want 1", kind, meta(d)["name"], len(subjects))
+		}
+		s, _ := subjects[0].(map[string]any)
+		if s["kind"] != "ServiceAccount" || s["namespace"] != "multi-tenant-operator" || s["name"] != "tenant-operator-template-operator-v2" {
+			t.Errorf("%s/%v binds %v, want ServiceAccount multi-tenant-operator/tenant-operator-template-operator-v2", kind, meta(d)["name"], s)
+		}
+	}
+	if n != 4 {
+		t.Errorf("checked %d bindings, want 4", n)
+	}
+}
+
 // roleVerbs collects the verbs a Role or ClusterRole grants on ONE
 // apiGroup/resource pair. Scoping matters: merging verbs across every rule
 // would let a `create` granted on some unrelated resource satisfy a check

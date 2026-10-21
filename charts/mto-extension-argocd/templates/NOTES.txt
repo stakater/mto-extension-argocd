@@ -7,6 +7,15 @@ mto-extension-argocd {{ .Chart.Version }} installed into {{ .Values.operatorName
 
 AppProjects are rendered into: {{ (.Values.argocd).namespace }}
 Scaffolding mode:              {{ $mode }}
+{{- if (.Values.rbac).create }}
+RBAC is bound to:              {{ ((.Values.rbac).serviceAccount).namespace }}/{{ ((.Values.rbac).serviceAccount).name }}
+
+That must be the ServiceAccount template-operator-v2 runs as, or nothing is
+reconciled. Check it with:
+
+  kubectl get deploy -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SA:.spec.template.spec.serviceAccountName' \
+    | grep template-operator-v2
+{{ end }}
 {{ if eq $mode "OnAnnotation" -}}
 Opt a tenant in with:
 

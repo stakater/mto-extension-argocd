@@ -102,13 +102,35 @@ OpenShift GitOps 1.22 ships ArgoCD 3.5.3, 1.21 ships 3.4.3, 1.20 ships 3.3.2.
 
 ## Quick start
 
-**1. Install.** `argocd.namespace` is required and has no default:
+**1. Install.** `argocd.namespace` is required and has no default.
+`rbac.serviceAccount` must be the ServiceAccount template-operator-v2 runs as:
 
 ```bash
 helm install mto-extension-argocd ./charts/mto-extension-argocd \
   --namespace multi-tenant-operator \
-  --set argocd.namespace=openshift-gitops
+  --set argocd.namespace=openshift-gitops \
+  --set rbac.serviceAccount.namespace=multi-tenant-operator \
+  --set rbac.serviceAccount.name=tenant-operator-template-operator-v2
 ```
+
+The ServiceAccount values above are the defaults. They match
+template-operator-v2 deployed by MTO (IntegrationConfig
+`components.templateOperatorV2.mode: Managed`). A standalone Helm release of
+template-operator-v2 runs as an account named after the release, in the
+release namespace. Find it with:
+
+```bash
+kubectl get deploy -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SA:.spec.template.spec.serviceAccountName' \
+  | grep template-operator-v2
+```
+
+With the wrong account the install succeeds, but nothing is reconciled: the
+chart's RBAC goes to an account that does not run anything. The parent
+TemplateInstance then reports `cannot list resource "tenants"`.
+
+Before 0.8.0 the default was `stakater-template-operator/template-operator-v2`.
+If you run a standalone template-operator-v2, set both values before you
+upgrade.
 
 Nothing is scaffolded yet — `scaffolding.mode` defaults to `OnAnnotation`.
 
@@ -186,6 +208,7 @@ Full reference with rationale in
 | Value | Default | |
 |---|---|---|
 | `argocd.namespace` | — | **Required.** Where AppProjects are created |
+| `rbac.serviceAccount` | `multi-tenant-operator/tenant-operator-template-operator-v2` | The account template-operator-v2 runs as. The default is the one MTO deploys it with — see [Quick start](#quick-start) |
 | `scaffolding.mode` | `OnAnnotation` | `Always`, `OnLabel`, `OnAnnotation`, `Never` |
 | `argocd.sourceRepos.pattern` | `[]` | Per-tenant repo patterns, one sourceRepos entry each; `{{ tenant }}` is expanded |
 | `argocd.clusterResourceWhitelist` | `[]` | Cluster-scoped kinds tenants may manage — read [Cluster-scoped kinds](#cluster-scoped-kinds) first |
