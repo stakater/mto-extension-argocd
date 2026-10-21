@@ -108,6 +108,14 @@ func TestTemplateGuardsHoldWithoutSchema(t *testing.T) {
 		{name: "non-list clusterResourceWhitelist",
 			json:    map[string]string{"argocd": `{"namespace":"argo-cd","clusterResourceWhitelist":"oops"}`},
 			wantErr: "argocd.clusterResourceWhitelist must be a list"},
+		// A scalar here fails the parent's `has` -- every tenant at once.
+		{name: "non-list reservedProjectNames",
+			json:    map[string]string{"argocd": `{"namespace":"argo-cd","reservedProjectNames":"platform"}`},
+			wantErr: "argocd.reservedProjectNames must be a list"},
+		{name: "empty reservedProjectNames entry",
+			sets:    map[string]string{"argocd.namespace": "argo-cd"},
+			json:    map[string]string{"argocd.reservedProjectNames": `["platform", ""]`},
+			wantErr: "argocd.reservedProjectNames entries must be non-empty strings"},
 		// A malformed namespace name passes minLength but the API server rejects
 		// every rendered AppProject on cluster, late. Space + uppercase here.
 		{name: "malformed argocd.namespace",

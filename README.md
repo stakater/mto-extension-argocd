@@ -215,6 +215,7 @@ Full reference with rationale in
 | `argocd.namespaceResourceBlacklist` | `[]` | Namespaced kinds they may not |
 | `sync.mode` | `strict` | Drift protection — see [Operations](#operations) |
 | `argocd.allowControlPlaneDestination` | `false` | The legacy, unsafe shape — see [Security defaults](#security-defaults) |
+| `argocd.reservedProjectNames` | `[]` | AppProject names no Tenant may take, in addition to `default` — see [Security defaults](#security-defaults) |
 | `argocd.allowClusterResourceNames` | `false` | Allow `name` on whitelist entries. Set it only on ArgoCD 3.3+ |
 | `roles.profile` | `leastPrivilege` | Or `extensionsCompatible`, the legacy shape |
 | `argocd.syncWindows` | `[]` | [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) on every AppProject |
@@ -312,6 +313,21 @@ the ArgoCD namespace leaves `destinations`, and the roles narrow. Applications
 that deploy *into* the ArgoCD namespace stop syncing; move them out of the
 control plane first, or set both compatibility values, upgrade, migrate, and
 remove them.
+
+**A Tenant cannot take over an AppProject by name** (since 0.8.0). The
+AppProject is named after the Tenant, and the apply takes ownership of every
+field the chart renders. A Tenant called `default` would replace ArgoCD's
+built-in catch-all project with its own, and delete it with the Tenant under
+purge. So `default` is always reserved, and `argocd.reservedProjectNames` adds
+the platform's own projects. A Tenant with a reserved name fails its own child:
+nothing is applied, the existing project does not change, and the error shows
+in the parent's status. Other tenants are not affected. If a Tenant took over
+a project before 0.8.0, its child now fails and the project keeps the shape the
+chart gave it. On template-operator-v2 v0.0.7 and later, remove that Tenant's
+opt-in with purge off: the project is released, and you can then restore it.
+On v0.0.6 and earlier, removing the opt-in **deletes** the project — for a
+Tenant called `default`, ArgoCD's own — so follow
+[docs/rollback.md](docs/rollback.md) first.
 
 ## Applications in the tenant's own namespace
 

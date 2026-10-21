@@ -194,6 +194,23 @@ into [].
 {{- end -}}
 
 {{- /*
+#29. Same skippable-schema reasoning. A scalar here would make the parent's
+mustFromJson yield a string and `has` fail the parent -- every tenant at once.
+An empty entry reserves nothing and reads as a mistake.
+*/ -}}
+{{- define "mto-extension-argocd.validateReservedProjectNames" -}}
+{{- $r := (.Values.argocd).reservedProjectNames -}}
+{{- if and (not (kindIs "invalid" $r)) (not (kindIs "slice" $r)) -}}
+{{- fail (printf "argocd.reservedProjectNames must be a list of AppProject names, got %s" (kindOf $r)) -}}
+{{- end -}}
+{{- range $n := $r | default list -}}
+{{- if or (not (kindIs "string" $n)) (eq $n "") -}}
+{{- fail (printf "argocd.reservedProjectNames entries must be non-empty strings, got %s %v" (kindOf $n) $n) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
 #9. ArgoCD matches sourceNamespaces as globs and regexes, so the pattern must
 expand to exactly one namespace name, and a different one per tenant. Without
 {{ tenant }} every AppProject lists the same namespace; with a glob,

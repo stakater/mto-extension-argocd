@@ -69,6 +69,15 @@
           "type": "boolean",
           "description": "Make the ArgoCD namespace a destination of every tenant (the legacy shape, UNSAFE: a path to ArgoCD admin, #6). Default false."
         },
+        "reservedProjectNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "AppProject names no Tenant may take (#29); a Tenant with one fails its own child. `default` is always reserved."
+        },
         "sourceNamespaces": {
           "type": "object",
           "additionalProperties": false,

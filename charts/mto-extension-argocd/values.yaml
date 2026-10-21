@@ -75,6 +75,18 @@ argocd:
     enabled: false
     pattern: "{{ tenant }}-argocd"
 
+  # AppProject names no Tenant may take (#29). The AppProject is named after
+  # the Tenant and applied server-side with ForceOwnership, so a Tenant called
+  # `default` would take over ArgoCD's built-in catch-all project: narrow it to
+  # one tenant's destinations and roles, and delete it with the Tenant when
+  # purge is on. `default` is always reserved. Add the platform's own projects
+  # here.
+  #
+  # A Tenant with a reserved name fails its own child, so the existing
+  # AppProject is not touched, and the refusal shows in the parent's status.
+  # Other tenants are not affected.
+  reservedProjectNames: []
+
   # Sync impersonation (#15). When enabled, every AppProject maps each tenant
   # namespace to `serviceAccount` IN that namespace, so ArgoCD syncs as that
   # account instead of its own cluster-admin controller. One entry per tenant

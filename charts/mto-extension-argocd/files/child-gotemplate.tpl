@@ -31,6 +31,9 @@ all. mustFromJson behaves identically in both, which is what lets the tests
 execute this file. TestGotemplatesNeverUsePlainFromJson enforces the rule.
 */ -}}
 {{- $t := .parameters.tenant }}
+{{- /* #29: first, so the error names the reserved name and nothing else is
+       checked or rendered for it. */ -}}
+{{- range $r := mustFromJson .parameters.projectNameRefusedJson }}{{- fail $r }}{{- end }}
 {{- $argoNs := .parameters.argoNamespace }}
 {{- $nsList := mustFromJson .parameters.namespacesJson }}
 {{- $wl := mustFromJson .parameters.whitelistJson }}

@@ -28,6 +28,11 @@ from per-tenant patterns only.
 
 **AC-ISO-5 — Malformed input fails one tenant, never the fleet.** *(R)* ✅
 
+**AC-ISO-6 — A Tenant cannot take over an AppProject the chart does not own.**
+*(R)* ✅ A Tenant named `default`, or a name in `argocd.reservedProjectNames`,
+fails its own child and renders nothing; the other tenants render
+(`TestTenantCannotTakeOverAReservedAppProject`).
+
 ## Access
 
 **AC-ACC-1 — Roles map to the tenant's owners, editors and viewers.** *(R, E)* ✅
