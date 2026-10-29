@@ -61,6 +61,10 @@ make e2e-test \
   E2E_TOV2_SA=system:serviceaccount:stakater-template-operator:template-operator-v2
 ```
 
+`E2E_TOV2_SA` is required here: the chart's `rbac.serviceAccount` default is
+the account MTO runs template-operator-v2 as, and this cluster runs a
+standalone release.
+
 Add `TEST_ARGS='-run TestManagedFleet'` style filtering by editing the target,
 or call `go test` directly with the same environment — `make e2e-test` is a
 thin wrapper over it.
@@ -87,9 +91,14 @@ KUBE_CONTEXT="<your-kube-context>" \
 E2E_TENANT=<an-existing-tenant> \
 E2E_ARGO_NAMESPACE=<argocd-namespace> \
 E2E_OPERATOR_NAMESPACE=<integrationconfig-namespace> \
-E2E_TOV2_SA=system:serviceaccount:<tov2-namespace>:template-operator-v2 \
+E2E_TOV2_SA=system:serviceaccount:multi-tenant-operator:tenant-operator-template-operator-v2 \
 make e2e-test
 ```
+
+`E2E_TOV2_SA` is the account template-operator-v2 runs as. The value above is
+the one MTO deploys it with; a standalone release runs as an account named
+after the release, in the release namespace. The suite binds the chart's RBAC
+to it and probes the RBAC as it.
 
 The package comment in [tests/e2e](../tests/e2e/e2e_test.go) spells out the
 difference. Tests that need to create tenants or namespaces skip there, and say

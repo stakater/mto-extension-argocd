@@ -291,6 +291,13 @@ func TwoStage(t *testing.T, f Fixture) (appProjects string, childErrs map[string
 		name, _ := meta(ti)["name"].(string)
 		params := paramMap(t, child)
 		for k, v := range paramMap(t, ti) {
+			// template-operator-v2 refuses an instance parameter its Template
+			// does not declare ("parameter not defined in template"). Merging
+			// it here regardless would pass a render that fails every child on
+			// cluster -- which is what a renamed or undeclared parameter does.
+			if _, declared := params[k]; !declared {
+				t.Fatalf("child %s passes parameter %q, which the child Template does not declare; template-operator-v2 would refuse the child", name, k)
+			}
 			params[k] = v
 		}
 		ns, _ := meta(ti)["namespace"].(string)
