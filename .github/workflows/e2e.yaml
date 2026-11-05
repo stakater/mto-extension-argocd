@@ -70,7 +70,7 @@ jobs:
       # but for pull_request_review it is the DEFAULT BRANCH: an approval-
       # triggered run would build main, report green, and gate nothing. The
       # expression falls back to the default for workflow_dispatch.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || '' }}
       - uses: actions/setup-go@v5
