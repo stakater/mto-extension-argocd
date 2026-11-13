@@ -58,7 +58,8 @@ this chart replaces it (README, "Differences from the Extensions controller").
 
 - Installing or configuring Argo CD itself (OpenShift GitOps, the Argo CD
   operator or Helm).
-- Per-tenant Argo CD instances.
+- Per-tenant Argo CD instances as the default. A tenant's own instance is an
+  opt-in on the roadmap (Phase 6); the shared instance stays the default.
 - Multi-cluster tenants (Argo CD Agent) for now.
 
 ## How we'll know it works

@@ -13,6 +13,7 @@ Phases → stories. Story format, lifecycle and method as in `method.md`.
 | **3 · Harden** ✅ | No tenant path into the control plane; least-privilege roles. Chart 0.2.0. |
 | **4 · Current Argo CD tenancy** ✅ | Applications in the tenant's own namespace; sync impersonation; group-pattern identity; baseline Argo CD 3.5 / OpenShift GitOps 1.22. Charts 0.3.0–0.5.0 and 0.7.1. |
 | **5 · Polish** ✅ | Sync windows, orphaned-resource monitoring, named cluster resources. Charts 0.6.0–0.7.1. |
+| **6 · Instance per tenant** 📝 | A tenant can have its own Argo CD instance instead of an AppProject on the shared one. Opt-in; the shared instance stays the default. |
 
 ---
 
@@ -96,3 +97,24 @@ Operator owns (example, not default; PR #23) · **A.11** per-tenant
 `syncWindows` and `orphanedResources: off|warn|monitor` (PR #21, chart 0.6.0)
 · **A.12** `name` on cluster-resource whitelist items, Argo CD 3.3+, behind
 `argocd.allowClusterResourceNames` (PR #22, chart 0.7.1) — all ✅ *Done*.
+
+## Phase 6 — Instance per tenant
+
+**Story A.13 — An Argo CD instance per tenant, opt-in** 📝 *Draft*
+
+As a platform team, I want to give a tenant its own Argo CD instance, so that
+tenants who need a hard boundary, their own Argo CD settings or their own
+upgrade pace don't share one control plane.
+
+Shape (to settle in planning): the chart renders an `ArgoCD` resource per
+opted-in tenant, in a namespace the tenant owns; OpenShift GitOps or the
+Argo CD operator installs and runs it, so the chart still installs nothing
+itself. The instance is namespace-scoped and manages only the tenant's
+namespaces; its roles come from the tenant's owners, editors and viewers, as
+the AppProject's do today. The shared instance with one AppProject per tenant
+stays the default.
+
+Decides: how a tenant opts in; namespace-scoped limits (no Applications in
+any namespace, N2; no cluster resources); the cost per instance and how many
+a cluster can run; single sign-on per instance; moving a tenant between the
+shared instance and its own.
