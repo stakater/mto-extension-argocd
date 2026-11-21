@@ -54,7 +54,7 @@ jobs:
       # review.
       - name: Notify on failure
         if: failure()
-        uses: slackapi/slack-github-action@37ebaef184d7626c5f204ab8d3baff4262dd30f0 # v1.27.0
+        uses: slackapi/slack-github-action@0bc3581177d9a0f8d555e07689384b376528e8fa # v4.1.0
         with:
           payload: |
             {
